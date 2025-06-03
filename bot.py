@@ -210,7 +210,7 @@ async def redeem_key(client, message):
 
     try:
         expiry = datetime.datetime.fromisoformat(key_info["expiry"])
-        if expiry < datetime.datetime.now():
+        if expiry < datetime.datetime.now(datetime.timezone.utc):
             return await message.reply("⌛ This key has expired!")
     except ValueError:
         return await message.reply("⚠️ Key has invalid expiry date")
