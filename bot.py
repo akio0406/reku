@@ -27,6 +27,11 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- App + Globals ---
+from pyrogram.filters import Filter
+
+class AuthenticatedUser(Filter):
+    async def __call__(self, _, __, message):
+        return await check_user_access(message.from_user.id)
 
 # --- Supabase-based key functions ---
 async def get_all_keys():
@@ -180,16 +185,11 @@ def format_duration(duration_str):
     except ValueError:
         return duration_str
 
-async def await await check_user_access(user_id):
-        keys = await get_all_keys()
-    user_id = str(user_id) 
-    for info in keys.values():
-        if str(info.get("redeemed_by")) == user_id:
-            try:
-                if datetime.datetime.fromisoformat(info["expiry"]) > datetime.datetime.now():
-                    return True
-            except ValueError:
-                continue
+async def check_user_access(user_id: int):
+    keys = await get_all_keys()
+    for key in keys:
+        if key["redeemed_by"] == user_id:
+            return True
     return False
 
 
@@ -350,7 +350,7 @@ async def help_command(client, message):
 
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    if await await check_user_access(message.from_user.id):
+    if await check_user_access(message.from_user.id):
         caption = (
             "🛡️ <b>PREMIUM TXT SEARCHER</b> 🛡️\n"
             "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
@@ -683,8 +683,7 @@ async def payment_command(client, message):
 
 @app.on_message(
     (filters.photo | filters.document) & 
-    filters.create(lambda _, __, m: m.from_user and user_state.get(m.from_user.id, {}).get("action") == "awaiting_payment_proof")
-)
+    AuthenticatedUser())
 async def process_payment_proof(client, message):
     user_id = message.from_user.id
     
@@ -817,7 +816,7 @@ async def accept_payment(client, callback_query):
     )
 
 @app.on_message(filters.text & filters.user(ADMIN_ID) & 
-                filters.create(lambda _, __, m: user_state.get(m.from_user.id, {}).get("action") == "awaiting_key_duration"))
+                AuthenticatedUser())
 async def process_key_duration(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -913,7 +912,7 @@ async def reject_payment(client, callback_query):
     )
 
 @app.on_message(filters.text & filters.user(ADMIN_ID) & 
-                filters.create(lambda _, __, m: user_state.get(m.from_user.id, {}).get("action") == "awaiting_reject_reason"))
+                AuthenticatedUser())
 async def process_reject_reason(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -1075,12 +1074,12 @@ async def confirm_delete_all_keys(client, callback_query):
 async def cancel_delete_all_keys(client, callback_query):
     await callback_query.message.edit_text("❌ Key deletion cancelled")
 
-@app.on_message(filters.command("removeurl") & filters.create(lambda _, __, m: await await check_user_access(m.from_user.id)))
+@app.on_message(filters.command("removeurl") & AuthenticatedUser())
 async def remove_url_request(client, message: Message):
     user_state[message.from_user.id] = {"action": "awaiting_file"}
     await message.reply("📂 Send me the file. I'll remove the URLs!")
 
-@app.on_message(filters.document & filters.create(lambda _, __, m: user_state.get(m.from_user.id, {}).get("action") == "awaiting_file"))
+@app.on_message(filters.document & AuthenticatedUser())
 async def process_remove_url(client, message: Message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -1148,7 +1147,7 @@ async def count_lines(client, message: Message):
     
     await message.reply(f"📊 Total lines for '{category}': {total_lines}")
 
-@app.on_message(filters.command("dice") & filters.create(lambda _, __, m: await await check_user_access(m.from_user.id)))
+@app.on_message(filters.command("dice") & AuthenticatedUser())
 async def dice_game(client, message):
     dice_roll = random.randint(1, 6)
     
@@ -1202,7 +1201,7 @@ async def dice_game(client, message):
     
     await message.reply(response, parse_mode=enums.ParseMode.HTML)
 
-@app.on_message(filters.command("merge") & filters.create(lambda _, __, m: await await check_user_access(m.from_user.id)))
+@app.on_message(filters.command("merge") & AuthenticatedUser())
 async def merge_command(client, message):
     user_state[message.from_user.id] = {
         "action": "awaiting_merge_files", 
@@ -1223,8 +1222,7 @@ async def merge_command(client, message):
 
 @app.on_message(
     filters.document & 
-    filters.create(lambda _, __, m: user_state.get(m.from_user.id, {}).get("action") == "awaiting_merge_files")
-)
+    AuthenticatedUser())
 async def process_merge_file(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -1249,7 +1247,7 @@ async def process_merge_file(client, message):
     except Exception as e:
         await message.reply(f"❌ Error processing file: {str(e)}")
 
-@app.on_message(filters.command("done") & filters.create(lambda _, __, m: user_state.get(m.from_user.id, {}).get("action") == "awaiting_merge_files"))
+@app.on_message(filters.command("done") & AuthenticatedUser())
 async def finish_merge(client, message):
     user_id = message.from_user.id
     if user_id not in user_state:
@@ -1349,8 +1347,7 @@ async def feedback_command(client, message):
 
 @app.on_message(
     (filters.text | filters.photo | filters.video) & 
-    filters.create(lambda _, __, m: m.from_user and m.from_user.id in user_state and user_state[m.from_user.id].get("action") == "awaiting_feedback")
-)
+    AuthenticatedUser())
 async def process_feedback(client, message):
     if not message.from_user:
         return
@@ -1406,7 +1403,7 @@ async def process_feedback(client, message):
 def restricted(_, __, message: Message):
     user_id = message.from_user.id
 
-    if await await check_user_access(user_id):
+    if await check_user_access(user_id):
         return True
 
     if user_id == ADMIN_ID:
@@ -1721,7 +1718,7 @@ async def active_users_command(client, message):
 def restricted(_, __, message: Message):
     """Check if user has access to use the command"""
     user_id = message.from_user.id
-    if await await check_user_access(user_id):
+    if await check_user_access(user_id):
         return True
     if user_id == ADMIN_ID:
         return True
