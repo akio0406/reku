@@ -1,5 +1,6 @@
 pyrogram
 tgcrypto
 pytz
-pycryptodome
 requests
+supabase
+pycryptodome
