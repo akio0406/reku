@@ -180,18 +180,18 @@ def format_duration(duration_str):
     except ValueError:
         return duration_str
 
-async def await await check_user_access(user_id):
-        keys = await get_all_keys()
-    user_id = str(user_id) 
-    for info in keys.values():
-        if str(info.get("redeemed_by")) == user_id:
+async def check_user_access(user_id):
+    keys = await get_all_keys()
+    user_id = str(user_id)
+    for key in keys:
+        if str(key.get("redeemed_by")) == user_id:
             try:
-                if datetime.datetime.fromisoformat(info["expiry"]) > datetime.datetime.now():
+                expiry = datetime.datetime.fromisoformat(key["expiry"])
+                if expiry > datetime.datetime.now():
                     return True
             except ValueError:
                 continue
     return False
-
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
@@ -350,7 +350,7 @@ async def help_command(client, message):
 
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    if await await check_user_access(message.from_user.id):
+    if await check_user_access(message.from_user.id):
         caption = (
             "🛡️ <b>PREMIUM TXT SEARCHER</b> 🛡️\n"
             "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
@@ -1075,7 +1075,7 @@ async def confirm_delete_all_keys(client, callback_query):
 async def cancel_delete_all_keys(client, callback_query):
     await callback_query.message.edit_text("❌ Key deletion cancelled")
 
-@app.on_message(filters.command("removeurl") & filters.create(lambda _, __, m: await await check_user_access(m.from_user.id)))
+@app.on_message(filters.command("removeurl") & filters.create(lambda _, __, m: await check_user_access(m.from_user.id)))
 async def remove_url_request(client, message: Message):
     user_state[message.from_user.id] = {"action": "awaiting_file"}
     await message.reply("📂 Send me the file. I'll remove the URLs!")
@@ -1148,7 +1148,7 @@ async def count_lines(client, message: Message):
     
     await message.reply(f"📊 Total lines for '{category}': {total_lines}")
 
-@app.on_message(filters.command("dice") & filters.create(lambda _, __, m: await await check_user_access(m.from_user.id)))
+@app.on_message(filters.command("dice") & filters.create(lambda _, __, m: await check_user_access(m.from_user.id)))
 async def dice_game(client, message):
     dice_roll = random.randint(1, 6)
     
@@ -1202,7 +1202,7 @@ async def dice_game(client, message):
     
     await message.reply(response, parse_mode=enums.ParseMode.HTML)
 
-@app.on_message(filters.command("merge") & filters.create(lambda _, __, m: await await check_user_access(m.from_user.id)))
+@app.on_message(filters.command("merge") & filters.create(lambda _, __, m: await check_user_access(m.from_user.id)))
 async def merge_command(client, message):
     user_state[message.from_user.id] = {
         "action": "awaiting_merge_files", 
@@ -1406,7 +1406,7 @@ async def process_feedback(client, message):
 def restricted(_, __, message: Message):
     user_id = message.from_user.id
 
-    if await await check_user_access(user_id):
+    if await check_user_access(user_id):
         return True
 
     if user_id == ADMIN_ID:
@@ -1721,7 +1721,7 @@ async def active_users_command(client, message):
 def restricted(_, __, message: Message):
     """Check if user has access to use the command"""
     user_id = message.from_user.id
-    if await await check_user_access(user_id):
+    if await check_user_access(user_id):
         return True
     if user_id == ADMIN_ID:
         return True
