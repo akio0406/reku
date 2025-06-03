@@ -48,23 +48,43 @@ async def delete_key_entry(key):
 
 
 
-# --- Supabase Key Management ---
-async def insert_key_entry(key, expiry, owner_id):
-    supabase.table("reku_keys").insert({"key": key, "expiry": expiry, "owner_id": owner_id}).execute()
+# --- Supabase Key Management (Final Version) ---
+async def get_all_keys():
+    res = supabase.table("reku_keys").select("*").execute()
+    return res.data if res.data else []
 
 async def get_key_entry(key):
     res = supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
     return res.data[0] if res.data else None
 
-async def get_all_keys():
-    res = supabase.table("reku_keys").select("*").execute()
-    return res.data if res.data else []
+async def insert_key_entry(key, expiry, owner_id, duration):
+    supabase.table("reku_keys").insert({
+        "key": key,
+        "expiry": expiry,
+        "owner_id": owner_id,
+        "duration": duration,
+        "created": datetime.datetime.now().isoformat()
+    }).execute()
 
 async def update_key_redeemed_by(key, user_id):
     supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
 
 async def delete_key_entry(key):
     supabase.table("reku_keys").delete().eq("key", key).execute()
+
+async def get_user_key_info(user_id: int):
+    keys = await get_all_keys()
+    for key in keys:
+        if str(key.get("redeemed_by")) == str(user_id):
+            return key["key"], key
+    return None, None
+
+async def check_user_access(user_id: int):
+    keys = await get_all_keys()
+    for key in keys:
+        if key["redeemed_by"] == user_id:
+            return True
+    return False
 
 
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -168,13 +188,6 @@ def check_user_access(user_id):
                 continue
     return False
 
-def get_user_key_info(user_id):
-    keys = load_keys()
-    user_id = str(user_id)
-    for key, info in keys.items():
-        if str(info.get("redeemed_by")) == user_id:
-            return key, info
-    return None, None
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
