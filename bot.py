@@ -79,7 +79,7 @@ async def get_user_key_info(user_id: int):
             return key["key"], key
     return None, None
 
-async async def await check_user_access(user_id: int):
+async def check_user_access(user_id: int):
         keys = await get_all_keys()
     for key in keys:
         if key["redeemed_by"] == user_id:
