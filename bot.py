@@ -47,6 +47,26 @@ async def delete_key_entry(key):
     supabase.table("reku_keys").delete().eq("key", key).execute()
 
 
+
+# --- Supabase Key Management ---
+async def insert_key_entry(key, expiry, owner_id):
+    supabase.table("reku_keys").insert({"key": key, "expiry": expiry, "owner_id": owner_id}).execute()
+
+async def get_key_entry(key):
+    res = supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
+    return res.data[0] if res.data else None
+
+async def get_all_keys():
+    res = supabase.table("reku_keys").select("*").execute()
+    return res.data if res.data else []
+
+async def update_key_redeemed_by(key, user_id):
+    supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
+
+async def delete_key_entry(key):
+    supabase.table("reku_keys").delete().eq("key", key).execute()
+
+
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 user_state = {}
