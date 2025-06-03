@@ -475,14 +475,8 @@ async def generate_key(client, message):
     
     expiry = (datetime.datetime.now() + delta).isoformat()
     key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
-    keys = await get_all_keys()
-    keys[key] = {
-        "expiry": expiry,
-        "redeemed_by": None,
-        "created": datetime.datetime.now().isoformat(),
-        "duration": duration_str
-    }
-    # Supabase handles saving automatically
+
+    await insert_key_entry(key=key, expiry=expiry, owner_id=None, duration=duration_str)
     
     human_duration = format_duration(duration_str)
     await message.reply(
@@ -492,63 +486,58 @@ async def generate_key(client, message):
         f"📅 Expires on: {expiry}"
     )
 
-@app.on_message(filters.command("masskey") & filters.user(ADMIN_ID))
-async def mass_generate_keys(client, message):
-    args = message.text.split()
-    if len(args) < 3:
-        return await message.reply(
-            "❌ <b>Usage:</b> <code>/masskey &lt;duration&gt; &lt;quantity&gt; [prefix]</code>\n\n"
-            "💡 <b>Examples:</b>\n"
-            "<code>/masskey 30d 50</code> - 50 keys for 30 days\n"
-            "<code>/masskey 1w 20 PREM-</code> - 20 keys for 1 week with 'PREM-' prefix",
-            parse_mode=enums.ParseMode.HTML
-        )
-    
-    duration_str = args[1]
-    delta = parse_duration(duration_str)
-    if not delta:
-        return await message.reply(
-            "❌ Invalid duration format. Use:\n"
-            "- <code>h</code> for hours\n"
-            "- <code>d</code> for days\n"
-            "- <code>w</code> for weeks\n"
-            "<b>Example:</b> <code>/masskey 30d 50</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
-    
+@app.on_callback_query(filters.regex("^confirm_masskey_"))
+async def confirm_masskey(client, callback_query):
+    parts = callback_query.data.split('_')
+    if len(parts) < 4:
+        await callback_query.answer("❌ Invalid data format", show_alert=True)
+        return
+
+    quantity_str = parts[2]
+    duration_str = parts[3]
+    prefix = '_'.join(parts[4:])  
+
     try:
-        quantity = int(args[2])
-        if quantity > 200:
-            return await message.reply("❌ Maximum quantity is 200 keys at once")
-        if quantity < 1:
-            return await message.reply("❌ Quantity must be at least 1")
+        quantity = int(quantity_str)
     except ValueError:
-        return await message.reply("❌ Quantity must be a number")
+        await callback_query.answer("❌ Invalid quantity value", show_alert=True)
+        return
 
-    prefix = "ιsαgι-"
-    if len(args) >= 4:
-        prefix = args[3].strip() + "-"
-        if len(prefix) > 10:
-            return await message.reply("❌ Prefix too long (max 10 characters)")
-    
+    delta = parse_duration(duration_str)
     expiry = (datetime.datetime.now() + delta).isoformat()
-    keys = await get_all_keys()
 
-    confirm_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ GENERATE KEYS", callback_data=f"confirm_masskey_{quantity}_{duration_str}_{prefix}")],
-        [InlineKeyboardButton("❌ CANCEL", callback_data="cancel_masskey")]
-    ])
+    generated_keys = []
+    for _ in range(quantity):
+        key = prefix + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=8))
+        await insert_key_entry(key=key, expiry=expiry, owner_id=None, duration=duration_str)
+        generated_keys.append(key)
+
+    keys_formatted = "\n".join(generated_keys)
+    human_duration = format_duration(duration_str)
+    filename = f"keys_{quantity}_{duration_str}.txt"
     
-    await message.reply(
-        f"⚠️ <b>Confirm Mass Key Generation</b>\n\n"
-        f"⏳ <b>Duration:</b> {format_duration(duration_str)}\n"
-        f"🔢 <b>Quantity:</b> {quantity}\n"
-        f"🔤 <b>Prefix:</b> {prefix}\n"
-        f"📅 <b>Expiry:</b> {expiry}\n\n"
-        "This will create <b>{quantity}</b> premium keys".format(quantity=quantity),
-        reply_markup=confirm_keyboard,
-        parse_mode=enums.ParseMode.HTML
-    )
+    with open(filename, "w") as f:
+        f.write(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+        f.write(f"Duration: {human_duration}\n")
+        f.write(f"Expiry: {expiry}\n\n")
+        f.write(keys_formatted)
+
+    try:
+        await callback_query.message.delete()
+        await client.send_document(
+            chat_id=callback_query.message.chat.id,
+            document=filename,
+            caption=(
+                f"✅ Successfully generated {quantity} keys\n"
+                f"⏳ Duration: {human_duration}\n"
+                f"📅 Expiry: {expiry}\n"
+                f"🔤 Prefix: {prefix}\n\n"
+                "⚠️ Store securely - keys are active immediately"
+            )
+        )
+    finally:
+        if os.path.exists(filename):
+            os.remove(filename)
 
 @app.on_callback_query(filters.regex("^confirm_masskey_"))
 async def confirm_masskey(client, callback_query):
@@ -815,49 +804,41 @@ async def accept_payment(client, callback_query):
         "Example: `30d` for 30 days"
     )
 
-@app.on_message(filters.text & filters.user(ADMIN_ID) & 
-                AuthenticatedUser())
+@app.on_message(filters.text & filters.user(ADMIN_ID) & AuthenticatedUser())
 async def process_key_duration(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
     
     if not state or state.get("action") != "awaiting_key_duration":
         return
-    
+
     payment_id = state["payment_id"]
     payments = load_payments()
-    
+
     if payment_id not in payments:
         await message.reply("❌ Payment not found!")
         user_state.pop(user_id, None)
         return
-    
+
     duration_str = message.text.strip()
     delta = parse_duration(duration_str)
-    
+
     if not delta:
         await message.reply("❌ Invalid duration format. Please try again.")
         return
-    
+
     payment = payments[payment_id]
     expiry = (datetime.datetime.now() + delta).isoformat()
     key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
-    
-    keys = await get_all_keys()
-    keys[key] = {
-        "expiry": expiry,
-        "redeemed_by": str(payment["user_id"]),
-        "created": datetime.datetime.now().isoformat(),
-        "duration": duration_str
-    }
-    # Supabase handles saving automatically
-    
+
+    await insert_key_entry(key=key, expiry=expiry, owner_id=payment["user_id"], duration=duration_str)
+
     payments[payment_id]["status"] = "accepted"
     payments[payment_id]["key"] = key
     save_payments(payments)
-    
+
     human_duration = format_duration(duration_str)
-    
+
     try:
         await client.send_message(
             chat_id=payment["user_id"],
@@ -872,18 +853,8 @@ async def process_key_duration(client, message):
         )
     except Exception:
         pass
-    
-    try:
-        await client.edit_message_caption(
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.id,
-            caption=callback_query.message.caption + f"\n\n✅ ACCEPTED\n🔑 Key: `{key}`\n⏳ Duration: {human_duration}",
-            reply_markup=None
-        )
-    except Exception:
-        pass
-    
-    await message.reply(f"✅ Payment accepted! Key sent to user.")
+
+    await message.reply(f"✅ Payment accepted! Key `{key}` sent to user.")
     user_state.pop(user_id, None)
 
 @app.on_callback_query(filters.regex("^reject_pay_"))
