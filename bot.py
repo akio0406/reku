@@ -709,7 +709,7 @@ async def payment_command(client, message):
 
 @app.on_message(
     (filters.photo | filters.document) &
-    filters.create(AuthenticatedUser()))
+    AuthenticatedUser())
 async def process_payment_proof(client, message):
     user_id = message.from_user.id
     
@@ -1211,7 +1211,7 @@ async def process_merge_file(client, message):
     except Exception as e:
         await message.reply(f"❌ Error processing file: {str(e)}")
 
-@app.on_message(filters.document & filters.create(AuthenticatedUser()))
+@app.on_message(filters.document & AuthenticatedUser())
 async def process_merge_file(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
