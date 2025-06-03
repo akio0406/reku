@@ -200,14 +200,12 @@ async def redeem_key(client, message):
         return await message.reply("❌ Usage: /redeem <key>\nExample: /redeem ISAGI-ABC123XYZ")
     
     key = args[1].strip().upper()
-    keys = await get_all_keys()
-    
-    if key not in keys:
-        return await message.reply("❌ Invalid key! Please check your key and try again.")
-    
-    key_info = keys[key]
+    key_info = await get_key_entry(key)
 
-    if key_info.get("redeemed_by"):
+    if not key_info:
+        return await message.reply("❌ Invalid key! Please check your key and try again.")
+
+    if key_info["redeemed_by"] is not None:
         return await message.reply("❌ This key has already been redeemed!")
 
     try:
@@ -216,18 +214,19 @@ async def redeem_key(client, message):
             return await message.reply("⌛ This key has expired!")
     except ValueError:
         return await message.reply("⚠️ Key has invalid expiry date")
-    existing_key, existing_info = get_user_key_info(message.from_user.id)
-    if existing_key:
-        return await message.reply(
-            "⚠️ You already have an active subscription!\n\n"
-            f"🔑 Current Key: {existing_key}\n"
-            f"⏳ Expiry: {existing_info['expiry']}\n\n"
-            "You can only have one active subscription at a time."
-        )
     
-    keys[key]["redeemed_by"] = str(message.from_user.id)
-    # Supabase handles saving automatically
-    
+    # Check if user already has a redeemed key
+    keys = await get_all_keys()
+    for existing in keys:
+        if existing["redeemed_by"] == message.from_user.id:
+            return await message.reply(
+                "⚠️ You already have an active subscription!\n\n"
+                f"🔑 Current Key: {existing['key']}\n"
+                f"⏳ Expiry: {existing['expiry']}\n\n"
+                "You can only have one active subscription at a time."
+            )
+
+    await update_key_redeemed_by(key, message.from_user.id)
     human_duration = format_duration(key_info.get("duration", "Unknown"))
     
     await message.reply(
@@ -255,6 +254,7 @@ async def redeem_key(client, message):
         )
     except Exception:
         pass
+
 
 @app.on_message(filters.command("myinfo"))
 async def user_info(client, message):
