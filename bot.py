@@ -177,7 +177,7 @@ def format_duration(duration_str):
         return duration_str
 
 def check_user_access(user_id):
-    keys = load_keys()
+    keys = await get_all_keys()
     user_id = str(user_id) 
     for info in keys.values():
         if str(info.get("redeemed_by")) == user_id:
@@ -196,7 +196,7 @@ async def redeem_key(client, message):
         return await message.reply("❌ Usage: /redeem <key>\nExample: /redeem ISAGI-ABC123XYZ")
     
     key = args[1].strip().upper()
-    keys = load_keys()
+    keys = await get_all_keys()
     
     if key not in keys:
         return await message.reply("❌ Invalid key! Please check your key and try again.")
@@ -222,7 +222,7 @@ async def redeem_key(client, message):
         )
     
     keys[key]["redeemed_by"] = str(message.from_user.id)
-    save_keys(keys)
+    # Supabase handles saving automatically
     
     human_duration = format_duration(key_info.get("duration", "Unknown"))
     
@@ -404,7 +404,7 @@ async def redeem_help(client, callback_query):
 
 @app.on_message(filters.command("users") & filters.user(ADMIN_ID))
 async def list_users(client, message):
-    keys = load_keys()
+    keys = await get_all_keys()
     users = {}
     
     for key, info in keys.items():
@@ -471,14 +471,14 @@ async def generate_key(client, message):
     
     expiry = (datetime.datetime.now() + delta).isoformat()
     key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
-    keys = load_keys()
+    keys = await get_all_keys()
     keys[key] = {
         "expiry": expiry,
         "redeemed_by": None,
         "created": datetime.datetime.now().isoformat(),
         "duration": duration_str
     }
-    save_keys(keys)
+    # Supabase handles saving automatically
     
     human_duration = format_duration(duration_str)
     await message.reply(
@@ -528,7 +528,7 @@ async def mass_generate_keys(client, message):
             return await message.reply("❌ Prefix too long (max 10 characters)")
     
     expiry = (datetime.datetime.now() + delta).isoformat()
-    keys = load_keys()
+    keys = await get_all_keys()
 
     confirm_keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ GENERATE KEYS", callback_data=f"confirm_masskey_{quantity}_{duration_str}_{prefix}")],
@@ -565,7 +565,7 @@ async def confirm_masskey(client, callback_query):
 
     delta = parse_duration(duration_str)
     expiry = (datetime.datetime.now() + delta).isoformat()
-    keys = load_keys()
+    keys = await get_all_keys()
     
     generated_keys = []
     for _ in range(quantity):
@@ -578,7 +578,7 @@ async def confirm_masskey(client, callback_query):
         }
         generated_keys.append(key)
     
-    save_keys(keys)
+    # Supabase handles saving automatically
     
     keys_formatted = "\n".join(generated_keys)
     human_duration = format_duration(duration_str)
@@ -619,12 +619,12 @@ async def remove_license(client, message):
     
     try:
         key = args[1]
-        keys = load_keys()
+        keys = await get_all_keys()
         if key not in keys:
             return await message.reply("🚫 Key not found.")
         
         keys.pop(key)
-        save_keys(keys)
+        # Supabase handles saving automatically
         await message.reply(f"✅ Key `{key}` has been removed.")
     except Exception as e:
         await message.reply(f"❌ Error: {str(e)}")
@@ -635,7 +635,7 @@ async def broadcast_message(client, message):
         return await message.reply("❌ Usage: /broadcast <message>")
     
     broadcast_text = message.text.split(maxsplit=1)[1]
-    keys = load_keys()
+    keys = await get_all_keys()
     users = set(str(info["redeemed_by"]) for info in keys.values() if info.get("redeemed_by"))
     
     if not users:
@@ -840,14 +840,14 @@ async def process_key_duration(client, message):
     expiry = (datetime.datetime.now() + delta).isoformat()
     key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
     
-    keys = load_keys()
+    keys = await get_all_keys()
     keys[key] = {
         "expiry": expiry,
         "redeemed_by": str(payment["user_id"]),
         "created": datetime.datetime.now().isoformat(),
         "duration": duration_str
     }
-    save_keys(keys)
+    # Supabase handles saving automatically
     
     payments[payment_id]["status"] = "accepted"
     payments[payment_id]["key"] = key
@@ -1040,7 +1040,7 @@ async def delete_all_keys(client, message):
 
 @app.on_callback_query(filters.regex("^confirm_delete_all_keys$"))
 async def confirm_delete_all_keys(client, callback_query):
-    keys = load_keys()
+    keys = await get_all_keys()
     key_count = len(keys)
 
     if os.path.exists(KEYS_FILE):
@@ -1649,7 +1649,7 @@ async def user_activity_command(client, message):
 @app.on_message(filters.command("activeusers") & filters.user(ADMIN_ID))
 async def active_users_command(client, message):
     activities = load_activity_log()
-    keys = load_keys()
+    keys = await get_all_keys()
     
     active_users = {}
     
