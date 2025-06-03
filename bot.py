@@ -30,8 +30,9 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 from pyrogram.filters import Filter
 
 class AuthenticatedUser(Filter):
-    async def __call__(self, _, __, message):
+    async def __call__(self, client, message):
         return await check_user_access(message.from_user.id)
+
 
 # --- Supabase-based key functions ---
 async def get_all_keys():
