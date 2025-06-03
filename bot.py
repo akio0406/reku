@@ -1400,7 +1400,7 @@ async def process_feedback(client, message):
     finally:
         user_state.pop(user_id, None)
 
-def restricted(_, __, message: Message):
+async def restricted(_, __, message: Message):
     user_id = message.from_user.id
 
     if await check_user_access(user_id):
@@ -1410,11 +1410,14 @@ def restricted(_, __, message: Message):
         return True
 
     now = time.time()
-    if user_id in search_cooldowns and now - search_cooldowns[user_id] < 60:
-        return False
+    if user_id in search_cooldowns:
+        last_search = search_cooldowns[user_id]
+        if now - last_search < 60:
+            return False
 
     search_cooldowns[user_id] = now
     return True
+
 
 # --- SEARCH COMMAND ---
 @app.on_message(filters.command("search") & filters.create(restricted))
@@ -1715,19 +1718,21 @@ async def active_users_command(client, message):
     else:
         await message.reply(response_text)
 
-def restricted(_, __, message: Message):
-    """Check if user has access to use the command"""
+async def restricted(_, __, message: Message):
     user_id = message.from_user.id
+
     if await check_user_access(user_id):
         return True
+
     if user_id == ADMIN_ID:
         return True
+
     now = time.time()
     if user_id in search_cooldowns:
         last_search = search_cooldowns[user_id]
         if now - last_search < 60:
             return False
-    
+
     search_cooldowns[user_id] = now
     return True
 
