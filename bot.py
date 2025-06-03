@@ -82,9 +82,10 @@ async def get_user_key_info(user_id: int):
 async def check_user_access(user_id: int):
     keys = await get_all_keys()
     for key in keys:
-    if key["redeemed_by"] == user_id:
-    return True
+        if key["redeemed_by"] == user_id:
+            return True
     return False
+
     
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
