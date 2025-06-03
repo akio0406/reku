@@ -1184,7 +1184,7 @@ async def dice_game(client, message):
     except Exception as e:
         await message.reply(f"❌ Error while fetching reward: {str(e)}")
 
-@app.on_message(filters.command("merge") & filters.create(AuthenticatedUser()))
+@app.on_message(filters.command("merge") & AuthenticatedUser())
 async def merge_command(client, message):
     user_state[message.from_user.id] = {
         "action": "awaiting_merge_files", 
