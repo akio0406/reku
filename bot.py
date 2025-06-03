@@ -78,12 +78,13 @@ async def update_key_redeemed_by(key, user_id):
 async def delete_key_entry(key):
     supabase.table("reku_keys").delete().eq("key", key).execute()
 
-async def get_user_key_info(user_id: int):
+async def get_user_key_info(user_id):
     keys = await get_all_keys()
-    for key in keys:
-        if str(key.get("redeemed_by")) == str(user_id):
-            return key["key"], key
+    for info in keys:
+        if str(info.get("redeemed_by")) == str(user_id):
+            return info["key"], info
     return None, None
+
 
 async def check_user_access(user_id: int):
     keys = await get_all_keys()
@@ -260,24 +261,24 @@ async def redeem_key(client, message):
 @app.on_message(filters.command("myinfo"))
 async def user_info(client, message):
     user_id = message.from_user.id
-    key, info = get_user_key_info(user_id)
-    
+    key, info = await get_user_key_info(user_id)
+
     if not key:
         return await message.reply("ℹ️ You don't have an active subscription")
-    
+
     try:
         expiry = datetime.datetime.fromisoformat(info["expiry"])
         remaining = expiry - datetime.datetime.now()
-        
+
         if remaining.days > 0:
             remaining_str = f"{remaining.days} days"
         else:
             hours = remaining.seconds // 3600
             minutes = (remaining.seconds % 3600) // 60
             remaining_str = f"{hours}h {minutes}m"
-        
+
         duration = format_duration(info.get("duration", "Unknown"))
-        
+
         info_text = (
             "🔑 <b>Your Subscription Info</b>\n"
             "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
@@ -290,6 +291,7 @@ async def user_info(client, message):
         await message.reply_text(info_text, parse_mode=enums.ParseMode.HTML)
     except Exception as e:
         await message.reply(f"❌ Error: {str(e)}")
+
 
 def get_log_files():
     return sorted([
@@ -412,7 +414,8 @@ async def list_users(client, message):
     keys = await get_all_keys()
     users = {}
     
-    for key, info in keys.items():
+    for info in keys:
+        key = info["key"]  # <-- FIXED indentation
         if info.get("redeemed_by"):
             user_id = info["redeemed_by"]
             try:
@@ -463,6 +466,7 @@ async def list_users(client, message):
     else:
         await message.reply(message_text, parse_mode=enums.ParseMode.HTML)
 
+
 @app.on_message(filters.command("generate") & filters.user(ADMIN_ID))
 async def generate_key(client, message):
     args = message.text.split()
@@ -487,58 +491,82 @@ async def generate_key(client, message):
         f"📅 Expires on: {expiry}"
     )
 
-@app.on_callback_query(filters.regex("^confirm_masskey_"))
-async def confirm_masskey(client, callback_query):
-    parts = callback_query.data.split('_')
-    if len(parts) < 4:
-        await callback_query.answer("❌ Invalid data format", show_alert=True)
-        return
+@app.on_message(filters.command("masskey") & filters.user(ADMIN_ID))
+async def mass_generate_keys(client, message):
+    args = message.text.split()
+    if len(args) < 3:
+        return await message.reply(
+            "❌ <b>Usage:</b> <code>/masskey &lt;duration&gt; &lt;quantity&gt; [prefix]</code>\n\n"
+            "💡 <b>Examples:</b>\n"
+            "<code>/masskey 30d 50</code> - 50 keys for 30 days\n"
+            "<code>/masskey 1w 20 PREM-</code> - 20 keys for 1 week with 'PREM-' prefix",
+            parse_mode=enums.ParseMode.HTML
+        )
 
-    quantity_str = parts[2]
-    duration_str = parts[3]
-    prefix = '_'.join(parts[4:])  
+    duration_str = args[1]
+    delta = parse_duration(duration_str)
+    if not delta:
+        return await message.reply(
+            "❌ Invalid duration format. Use:\n"
+            "- <code>h</code> for hours\n"
+            "- <code>d</code> for days\n"
+            "- <code>w</code> for weeks\n"
+            "<b>Example:</b> <code>/masskey 30d 50</code>",
+            parse_mode=enums.ParseMode.HTML
+        )
 
     try:
-        quantity = int(quantity_str)
+        quantity = int(args[2])
+        if quantity > 200:
+            return await message.reply("❌ Maximum quantity is 200 keys at once")
+        if quantity < 1:
+            return await message.reply("❌ Quantity must be at least 1")
     except ValueError:
-        await callback_query.answer("❌ Invalid quantity value", show_alert=True)
-        return
+        return await message.reply("❌ Quantity must be a number")
 
-    delta = parse_duration(duration_str)
+    prefix = "ιsαgι-"
+    if len(args) >= 4:
+        prefix = args[3].strip() + "-"
+        if len(prefix) > 10:
+            return await message.reply("❌ Prefix too long (max 10 characters)")
+
     expiry = (datetime.datetime.now() + delta).isoformat()
 
     generated_keys = []
     for _ in range(quantity):
         key = prefix + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=8))
-        await insert_key_entry(key=key, expiry=expiry, owner_id=None, duration=duration_str)
+        await insert_key_entry(
+            key=key,
+            expiry=expiry,
+            owner_id=None,
+            duration=duration_str
+        )
         generated_keys.append(key)
 
     keys_formatted = "\n".join(generated_keys)
     human_duration = format_duration(duration_str)
+
     filename = f"keys_{quantity}_{duration_str}.txt"
-    
     with open(filename, "w") as f:
         f.write(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
         f.write(f"Duration: {human_duration}\n")
         f.write(f"Expiry: {expiry}\n\n")
         f.write(keys_formatted)
 
-    try:
-        await callback_query.message.delete()
-        await client.send_document(
-            chat_id=callback_query.message.chat.id,
-            document=filename,
-            caption=(
-                f"✅ Successfully generated {quantity} keys\n"
-                f"⏳ Duration: {human_duration}\n"
-                f"📅 Expiry: {expiry}\n"
-                f"🔤 Prefix: {prefix}\n\n"
-                "⚠️ Store securely - keys are active immediately"
-            )
+    await client.send_document(
+        chat_id=message.chat.id,
+        document=filename,
+        caption=(
+            f"✅ Successfully generated {quantity} keys\n"
+            f"⏳ Duration: {human_duration}\n"
+            f"📅 Expiry: {expiry}\n"
+            f"🔤 Prefix: {prefix}\n\n"
+            "⚠️ Store securely - keys are active immediately"
         )
-    finally:
-        if os.path.exists(filename):
-            os.remove(filename)
+    )
+
+    if os.path.exists(filename):
+        os.remove(filename)
 
 @app.on_callback_query(filters.regex("^confirm_masskey_"))
 async def confirm_masskey(client, callback_query):
@@ -609,17 +637,17 @@ async def cancel_masskey(client, callback_query):
 async def remove_license(client, message):
     args = message.text.split()
     if len(args) != 2:
-        return await message.reply("❌ Usage: `/remove <key>`")
-    
+        return await message.reply("❌ Usage: `/remove <key>`", parse_mode=enums.ParseMode.MARKDOWN)
+
+    key = args[1].strip()
     try:
-        key = args[1]
-        keys = await get_all_keys()
-        if key not in keys:
+        key_data = await get_key_entry(key)
+        if not key_data:
             return await message.reply("🚫 Key not found.")
-        
-        keys.pop(key)
-        # Supabase handles saving automatically
-        await message.reply(f"✅ Key `{key}` has been removed.")
+
+        await delete_key_entry(key)
+        await message.reply(f"✅ Key `{key}` has been removed.", parse_mode=enums.ParseMode.MARKDOWN)
+
     except Exception as e:
         await message.reply(f"❌ Error: {str(e)}")
 
@@ -630,11 +658,13 @@ async def broadcast_message(client, message):
     
     broadcast_text = message.text.split(maxsplit=1)[1]
     keys = await get_all_keys()
-    users = set(str(info["redeemed_by"]) for info in keys.values() if info.get("redeemed_by"))
+
+    # Extract unique user IDs from redeemed keys
+    users = {str(info["redeemed_by"]) for info in keys if info.get("redeemed_by")}
     
     if not users:
         return await message.reply("ℹ️ No users to broadcast to")
-    
+
     await message.reply(f"📢 Starting broadcast to {len(users)} users...")
     
     success = 0
@@ -647,16 +677,17 @@ async def broadcast_message(client, message):
                 parse_mode=enums.ParseMode.HTML
             )
             success += 1
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)  # prevent rate limiting
         except Exception as e:
             failed += 1
             print(f"Failed to send to {user_id}: {str(e)}")
-    
+
     await message.reply(
         f"📊 Broadcast completed:\n"
         f"✅ Success: {success}\n"
         f"❌ Failed: {failed}"
     )
+
 
 @app.on_message(filters.command("payment"))
 async def payment_command(client, message):
@@ -998,7 +1029,6 @@ async def cancel_command(client, message):
 
 @app.on_message(filters.command("deleteallkeys") & filters.user(ADMIN_ID))
 async def delete_all_keys(client, message):
-
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔥 YES, DELETE ALL KEYS", callback_data="confirm_delete_all_keys")],
         [InlineKeyboardButton("❌ CANCEL", callback_data="cancel_delete_all_keys")]
@@ -1013,52 +1043,38 @@ async def delete_all_keys(client, message):
         parse_mode=enums.ParseMode.HTML
     )
 
+
 @app.on_callback_query(filters.regex("^confirm_delete_all_keys$"))
 async def confirm_delete_all_keys(client, callback_query):
-    keys = await get_all_keys()
-    key_count = len(keys)
-
-    if os.path.exists(KEYS_FILE):
-        os.remove(KEYS_FILE)
-    
-    await callback_query.message.edit_text(
-        f"🔥 <b>ALL KEYS DELETED!</b>\n\n"
-        f"✅ Successfully removed {key_count} keys\n"
-        f"🗑️ Database file has been permanently erased",
-        parse_mode=enums.ParseMode.HTML
-    )
-
-    for key, info in keys.items():
-        user_id = info.get("redeemed_by")
-        if user_id:
-            try:
-                await client.send_message(
-                    chat_id=user_id,
-                    text="⚠️ <b>SUBSCRIPTION TERMINATED</b>\n\n"
-                         "Your premium access has been revoked because the admin deleted all keys.\n"
-                         "Contact support if you believe this is a mistake.",
-                    parse_mode=enums.ParseMode.HTML
-                )
-            except Exception:
-                pass
+    try:
+        supabase.table("reku_keys").delete().neq("key", "").execute()
+        await callback_query.message.edit_text("✅ All keys have been permanently deleted.")
+    except Exception as e:
+        await callback_query.message.edit_text(f"❌ Error deleting keys: {str(e)}")
 
 @app.on_callback_query(filters.regex("^cancel_delete_all_keys$"))
 async def cancel_delete_all_keys(client, callback_query):
-    await callback_query.message.edit_text("❌ Key deletion cancelled")
+    await callback_query.message.edit_text("❌ Key deletion cancelled.")
 
-@app.on_message(filters.command("removeurl") & AuthenticatedUser())
+@app.on_message(filters.command("removeurl"))
 async def remove_url_request(client, message: Message):
+    if not await check_user_access(message.from_user.id):
+        return await message.reply("❌ You are not authorized to use this command.")
+    
     user_state[message.from_user.id] = {"action": "awaiting_file"}
     await message.reply("📂 Send me the file. I'll remove the URLs!")
 
-@app.on_message(filters.document & AuthenticatedUser())
+@app.on_message(filters.document)
 async def process_remove_url(client, message: Message):
     user_id = message.from_user.id
+
+    if not await check_user_access(user_id):
+        return await message.reply("❌ You are not authorized to use this command.")
+
     state = user_state.get(user_id)
-    
     if not state or state.get("action") != "awaiting_file":
         return
-    
+
     try:
         file_path = await message.download()
         
@@ -1119,10 +1135,13 @@ async def count_lines(client, message: Message):
     
     await message.reply(f"📊 Total lines for '{category}': {total_lines}")
 
-@app.on_message(filters.command("dice") & AuthenticatedUser())
+@app.on_message(filters.command("dice"))
 async def dice_game(client, message):
+    if not await check_user_access(message.from_user.id):
+        return await message.reply("❌ You are not authorized to use this command.")
+
     dice_roll = random.randint(1, 6)
-    
+
     rewards = {
         1: "roblox",
         2: "mobilelegends",
@@ -1131,49 +1150,41 @@ async def dice_game(client, message):
         5: "gaslite",
         6: "riotgames.com"
     }
-    
-    keyword = rewards[dice_roll]
-    await message.reply(f"🎲 You rolled a {dice_roll}! Searching for: {keyword}")
-    
-    log_files = get_log_files()
-    used_lines = set()
-    
-    if os.path.exists("no_dupes_don't_delete.txt"):
-        with open("no_dupes_don't_delete.txt", "r", encoding="utf-8") as f:
-            used_lines = set(line.strip() for line in f)
-    
-    found_lines = []
-    for log in log_files:
-        try:
-            with open(log, "r", encoding="utf-8", errors="ignore") as file:
-                for line in file:
-                    line = line.strip()
-                    if keyword.lower() in line.lower() and line not in used_lines:
-                        found_lines.append(":".join(line.split(":")[-2:]))
-        except Exception:
-            continue
-    
-    if not found_lines:
-        await message.reply("❌ No accounts found for your reward. Try again!")
-        return
-    
-    reward_count = min(random.randint(1, 3), len(found_lines))
-    reward_accounts = random.sample(found_lines, reward_count)
-    
-    with open("no_dupes_don't_delete.txt", "a", encoding="utf-8") as f:
-        for acc in reward_accounts:
-            f.write(acc + "\n")
-    
-    response = (
-        f"🎁 <b>You won {reward_count} {keyword} account(s):</b>\n"
-        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-    )
-    for acc in reward_accounts:
-        response += f"<code>{acc}</code>\n"
-    
-    await message.reply(response, parse_mode=enums.ParseMode.HTML)
 
-@app.on_message(filters.command("merge") & AuthenticatedUser())
+    keyword = rewards[dice_roll]
+    await message.reply(f"🎲 You rolled a {dice_roll}! Searching for: <b>{keyword}</b>", parse_mode=enums.ParseMode.HTML)
+
+    try:
+        # Query Supabase for up to 50 matching lines
+        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(50).execute()
+        lines = [entry["line"] for entry in res.data if keyword.lower() in entry["line"].lower()]
+
+        if not lines:
+            return await message.reply("❌ No accounts found for your reward. Try again!")
+
+        reward_count = min(random.randint(1, 3), len(lines))
+        reward_accounts = random.sample(lines, reward_count)
+
+        # Prevent duplicates by saving to local file
+        with open("no_dupes_don't_delete.txt", "a", encoding="utf-8") as f:
+            for acc in reward_accounts:
+                f.write(acc.strip() + "\n")
+
+        response = (
+            f"🎁 <b>You won {reward_count} {keyword} account(s):</b>\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+        )
+        for acc in reward_accounts:
+            parts = acc.strip().split(":")
+            display = ":".join(parts[-2:]) if len(parts) >= 2 else acc.strip()
+            response += f"<code>{display}</code>\n"
+
+        await message.reply(response, parse_mode=enums.ParseMode.HTML)
+
+    except Exception as e:
+        await message.reply(f"❌ Error while fetching reward: {str(e)}")
+
+@app.on_message(filters.command("merge") & filters.create(AuthenticatedUser()))
 async def merge_command(client, message):
     user_state[message.from_user.id] = {
         "action": "awaiting_merge_files", 
@@ -1189,12 +1200,12 @@ async def merge_command(client, message):
         "- Send multiple .txt files\n"
         "- Type /done when finished\n"
         "- Type /cancel to abort\n\n"
-        "⚠️ **Note:** Files will be deduplicated automatically"
+        "⚠️ **Note:** Files will be deduplicated automatically",
+        parse_mode=enums.ParseMode.MARKDOWN
     )
 
-@app.on_message(
-    filters.document & 
-    AuthenticatedUser())
+
+@app.on_message(filters.document & filters.create(AuthenticatedUser()))
 async def process_merge_file(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -1219,7 +1230,8 @@ async def process_merge_file(client, message):
     except Exception as e:
         await message.reply(f"❌ Error processing file: {str(e)}")
 
-@app.on_message(filters.command("done") & AuthenticatedUser())
+
+@app.on_message(filters.command("done") & filters.create(AuthenticatedUser()))
 async def finish_merge(client, message):
     user_id = message.from_user.id
     if user_id not in user_state:
@@ -1291,16 +1303,17 @@ async def finish_merge(client, message):
         
         await message.reply_document(
             document=merged_filename,
-            caption="\n".join(stats)
+            caption="\n".join(stats),
+            parse_mode=enums.ParseMode.MARKDOWN
         )
         
     except Exception as e:
         await message.reply(f"❌ Merge failed: {str(e)}")
     finally:
-        if user_id in user_state:
-            user_state.pop(user_id, None)
+        user_state.pop(user_id, None)
         if 'merged_filename' in locals() and os.path.exists(merged_filename):
             os.remove(merged_filename)
+
 
 @app.on_message(filters.command("feedback"))
 async def feedback_command(client, message):
@@ -1622,36 +1635,37 @@ async def user_activity_command(client, message):
     else:
         await message.reply(response_text)
 
+
 @app.on_message(filters.command("activeusers") & filters.user(ADMIN_ID))
 async def active_users_command(client, message):
     activities = load_activity_log()
-    keys = await get_all_keys()
-    
+    keys = await get_all_keys()  # expects a list of dicts
+
     active_users = {}
-    
-    for key, info in keys.items():
-        if info.get("redeemed_by"):
-            user_id = info["redeemed_by"]
+
+    for info in keys:
+        if info.get("redeemed_by") and "expiry" in info:
+            user_id = str(info["redeemed_by"])
             try:
                 expiry = datetime.datetime.fromisoformat(info["expiry"])
                 if expiry > datetime.datetime.now():
                     active_users[user_id] = {
-                        "key": key,
+                        "key": info.get("key", "N/A"),
                         "expiry": info["expiry"],
                         "last_activity": None
                     }
             except ValueError:
                 continue
-    
+
     for user_id, data in active_users.items():
-        user_activities = activities.get(user_id, [])
+        user_activities = activities.get(str(user_id), [])
         if user_activities:
             last_activity = user_activities[-1]
             data["last_activity"] = {
                 "action": last_activity["action"],
                 "timestamp": last_activity["timestamp"]
             }
-    
+
     if not active_users:
         return await message.reply("ℹ️ No active users found.")
     
@@ -1681,6 +1695,7 @@ async def active_users_command(client, message):
             response.append("   ⏱ No recorded activity")
         
         response.append("")     
+
     response_text = "\n".join(response)
     
     if len(response_text) > 4096:
@@ -1690,23 +1705,6 @@ async def active_users_command(client, message):
     else:
         await message.reply(response_text)
 
-async def restricted(_, __, message: Message):
-    user_id = message.from_user.id
-
-    if await check_user_access(user_id):
-        return True
-
-    if user_id == ADMIN_ID:
-        return True
-
-    now = time.time()
-    if user_id in search_cooldowns:
-        last_search = search_cooldowns[user_id]
-        if now - last_search < 60:
-            return False
-
-    search_cooldowns[user_id] = now
-    return True
 
 from collections import defaultdict
 
