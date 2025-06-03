@@ -35,7 +35,7 @@ class AuthenticatedUser(Filter):
 
 
 # --- Supabase-based key functions ---
-async def get_all_keys():
+def get_all_keys():
     res = supabase.table("reku_keys").select("*").execute()
     return res.data if res.data else []
 
@@ -55,7 +55,7 @@ async def delete_key_entry(key):
 
 
 # --- Supabase Key Management (Final Version) ---
-async def get_all_keys():
+def get_all_keys():
     res = supabase.table("reku_keys").select("*").execute()
     return res.data if res.data else []
 
@@ -91,8 +91,8 @@ async def check_user_access(user_id: int):
     for key in keys:
         if str(key.get("redeemed_by")) == str(user_id):
             try:
-                expiry = datetime.datetime.fromisoformat(key["expiry"])
-                if expiry > datetime.datetime.now():
+                expiry = datetime.fromisoformat(key["expiry"])
+                if expiry > datetime.now(timezone.utc):  # ← FIXED
                     return True
             except Exception:
                 continue
@@ -190,8 +190,13 @@ def format_duration(duration_str):
 async def check_user_access(user_id: int):
     keys = await get_all_keys()
     for key in keys:
-        if key["redeemed_by"] == user_id:
-            return True
+        if str(key.get("redeemed_by")) == str(user_id):
+            try:
+                expiry = datetime.fromisoformat(key["expiry"])
+                if expiry > datetime.now(timezone.utc):  # ← FIXED
+                    return True
+            except Exception:
+                continue
     return False
 
 
@@ -703,8 +708,8 @@ async def payment_command(client, message):
     )
 
 @app.on_message(
-    (filters.photo | filters.document) & 
-    AuthenticatedUser())
+    (filters.photo | filters.document) &
+    filters.create(AuthenticatedUser()))
 async def process_payment_proof(client, message):
     user_id = message.from_user.id
     
@@ -715,9 +720,9 @@ async def process_payment_proof(client, message):
     except:
         user_info = f"User ID: {user_id}"
     
-    payment_details = message.caption if message.caption else "No payment details provided"
-    
+    payment_details = message.caption or "No payment details provided"
     payment_id = f"PAY-{int(time.time())}-{random.randint(1000,9999)}"
+    
     payments = load_payments()
     
     if message.photo:
@@ -727,8 +732,7 @@ async def process_payment_proof(client, message):
         file_id = message.document.file_id
         file_type = "document"
     else:
-        await message.reply("❌ Unsupported file type. Please send a photo or document.")
-        return
+        return await message.reply("❌ Unsupported file type. Please send a photo or document.")
     
     payments[payment_id] = {
         "user_id": user_id,
@@ -743,11 +747,11 @@ async def process_payment_proof(client, message):
     save_payments(payments)
     
     payment_msg = (
-        f"💰 **New Payment Proof** ({payment_id})\n\n"
-        f"👤 **From:** {user_info}\n"
-        f"🆔 **User ID:** `{user_id}`\n"
-        f"📅 **Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        f"📝 **Payment Details:**\n{payment_details}"
+        f"💰 <b>New Payment Proof</b> ({payment_id})\n\n"
+        f"👤 <b>From:</b> {user_info}\n"
+        f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
+        f"📅 <b>Date:</b> {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"📝 <b>Payment Details:</b>\n{payment_details}"
     )
     
     keyboard = InlineKeyboardMarkup([
@@ -759,19 +763,21 @@ async def process_payment_proof(client, message):
     ])
     
     try:
-        if message.photo:
+        if file_type == "photo":
             await client.send_photo(
                 chat_id=ADMIN_ID,
                 photo=file_id,
                 caption=payment_msg,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode=enums.ParseMode.HTML
             )
-        elif message.document:
+        else:
             await client.send_document(
                 chat_id=ADMIN_ID,
                 document=file_id,
                 caption=payment_msg,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode=enums.ParseMode.HTML
             )
         
         await message.reply(
@@ -863,7 +869,12 @@ async def process_key_duration(client, message):
     expiry = (datetime.datetime.now() + delta).isoformat()
     key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
 
-    await insert_key_entry(key=key, expiry=expiry, owner_id=payment["user_id"], duration=duration_str)
+    await insert_key_entry(
+        key=key,
+        expiry=expiry,
+        owner_id=payment["user_id"],
+        duration=duration_str
+    )
 
     payments[payment_id]["status"] = "accepted"
     payments[payment_id]["key"] = key
@@ -888,6 +899,7 @@ async def process_key_duration(client, message):
 
     await message.reply(f"✅ Payment accepted! Key `{key}` sent to user.")
     user_state.pop(user_id, None)
+
 
 @app.on_callback_query(filters.regex("^reject_pay_"))
 async def reject_payment(client, callback_query):
@@ -914,8 +926,7 @@ async def reject_payment(client, callback_query):
         "Please send the reason for rejection (this will be sent to the user):"
     )
 
-@app.on_message(filters.text & filters.user(ADMIN_ID) & 
-                AuthenticatedUser())
+@app.on_message(filters.text & filters.user(ADMIN_ID) & AuthenticatedUser())
 async def process_reject_reason(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -950,19 +961,10 @@ async def process_reject_reason(client, message):
         )
     except Exception:
         pass
-    
-    try:
-        await client.edit_message_caption(
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.id,
-            caption=callback_query.message.caption + f"\n\n❌ REJECTED\nReason: {reason}",
-            reply_markup=None
-        )
-    except Exception:
-        pass
-    
+
     await message.reply(f"✅ Payment {payment_id} rejected. User notified.")
     user_state.pop(user_id, None)
+
 
 @app.on_callback_query(filters.regex("^view_pay_"))
 async def view_payment(client, callback_query):
@@ -1184,27 +1186,6 @@ async def dice_game(client, message):
     except Exception as e:
         await message.reply(f"❌ Error while fetching reward: {str(e)}")
 
-@app.on_message(filters.command("merge") & AuthenticatedUser())
-async def merge_command(client, message):
-    user_state[message.from_user.id] = {
-        "action": "awaiting_merge_files", 
-        "files": [],
-        "file_names": [],
-        "timestamp": time.time()
-    }
-    
-    await message.reply(
-        "📂 **File Merge Started**\n\n"
-        "Please send me the .txt files you want to merge (one by one).\n\n"
-        "✅ **Supported Actions:**\n"
-        "- Send multiple .txt files\n"
-        "- Type /done when finished\n"
-        "- Type /cancel to abort\n\n"
-        "⚠️ **Note:** Files will be deduplicated automatically",
-        parse_mode=enums.ParseMode.MARKDOWN
-    )
-
-
 @app.on_message(filters.document & AuthenticatedUser())
 async def process_merge_file(client, message):
     user_id = message.from_user.id
@@ -1230,8 +1211,32 @@ async def process_merge_file(client, message):
     except Exception as e:
         await message.reply(f"❌ Error processing file: {str(e)}")
 
+@app.on_message(filters.document & filters.create(AuthenticatedUser()))
+async def process_merge_file(client, message):
+    user_id = message.from_user.id
+    state = user_state.get(user_id)
+    
+    if not state or time.time() - state["timestamp"] > 600:
+        user_state.pop(user_id, None)
+        return await message.reply("⌛ Merge session expired. Please start again with /merge")
+    
+    if not message.document.file_name.lower().endswith('.txt'):
+        return await message.reply("❌ Only .txt files are supported for merging")
+    
+    try:
+        file_path = await message.download()
+        state["files"].append(file_path)
+        state["file_names"].append(message.document.file_name)
+        
+        await message.reply(
+            f"✅ Added {message.document.file_name}\n"
+            f"📁 Total files: {len(state['files'])}\n\n"
+            "Send more files or type /done when finished"
+        )
+    except Exception as e:
+        await message.reply(f"❌ Error processing file: {str(e)}")
 
-@app.on_message(filters.command("done") & filters.create(AuthenticatedUser()))
+@app.on_message(filters.command("done") & AuthenticatedUser())
 async def finish_merge(client, message):
     user_id = message.from_user.id
     if user_id not in user_state:
@@ -1314,7 +1319,6 @@ async def finish_merge(client, message):
         if 'merged_filename' in locals() and os.path.exists(merged_filename):
             os.remove(merged_filename)
 
-
 @app.on_message(filters.command("feedback"))
 async def feedback_command(client, message):
     if not message.from_user:
@@ -1331,54 +1335,52 @@ async def feedback_command(client, message):
     )
 
 @app.on_message(
-    (filters.text | filters.photo | filters.video) & 
+    (filters.text | filters.photo | filters.video) &
     AuthenticatedUser())
 async def process_feedback(client, message):
     if not message.from_user:
         return
-    
+
     user_id = message.from_user.id
-    feedback_content = ""
-    
-    if message.text:
-        feedback_content = message.text
-    elif message.photo or message.video:
-        feedback_content = message.caption if message.caption else "[Media feedback]"
-    
+    feedback_content = message.text or message.caption or "[No message text]"
+
     try:
         user = await client.get_users(user_id)
         user_info = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
         user_info += f" (@{user.username})" if user.username else ""
     except:
         user_info = f"User ID: {user_id}"
-    
+
     feedback_msg = (
-        "📬 **New Feedback**\n\n"
-        f"👤 **From:** {user_info}\n"
-        f"🆔 **User ID:** `{user_id}`\n"
-        f"📅 **Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        f"💬 **Feedback:**\n{feedback_content}"
+        "📬 *New Feedback*\n\n"
+        f"👤 *From:* {user_info}\n"
+        f"🆔 *User ID:* `{user_id}`\n"
+        f"📅 *Date:* {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"💬 *Feedback:*\n{feedback_content}"
     )
-    
+
     try:
         if message.photo:
             await client.send_photo(
                 chat_id=ADMIN_ID,
                 photo=message.photo.file_id,
-                caption=feedback_msg
+                caption=feedback_msg,
+                parse_mode=enums.ParseMode.MARKDOWN
             )
         elif message.video:
             await client.send_video(
                 chat_id=ADMIN_ID,
                 video=message.video.file_id,
-                caption=feedback_msg
+                caption=feedback_msg,
+                parse_mode=enums.ParseMode.MARKDOWN
             )
         else:
             await client.send_message(
                 chat_id=ADMIN_ID,
-                text=feedback_msg
+                text=feedback_msg,
+                parse_mode=enums.ParseMode.MARKDOWN
             )
-        
+
         await message.reply("✅ Your feedback has been sent to the admin. Thank you!")
     except Exception as e:
         await message.reply(f"❌ Failed to send feedback: {str(e)}")
