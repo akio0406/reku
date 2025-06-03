@@ -1687,4 +1687,58 @@ def restricted(_, __, message: Message):
     search_cooldowns[user_id] = now
     return True
 
+from collections import defaultdict
+
+# Match the search UI buttons
+KEYWORDS = [
+    "roblox",
+    "mobilelegends",
+    "codashop",
+    "garena.com",
+    "100082",
+    "100055",
+    "authgop.garena.com",
+    "gaslite",
+    "facebook.com",
+    "instagram.com",
+    "whatsapp.com",
+    "twitter.com",
+    "discord.com",
+    "google.com",
+    "yahoo.com",
+    "outlook.com",
+    "riotgames.com",
+    "battle.net",
+    "minecraft.net",
+    "supercell.com",
+    "wargaming.net"
+]
+
+@app.on_message(filters.command("checklines"))
+async def check_lines(_, message: Message):
+    try:
+        counts = defaultdict(int)
+
+        # Query line count for each keyword
+        for keyword in KEYWORDS:
+            query = supabase.table("reku").select("line", count="exact").ilike("line", f"%{keyword}%")
+            res = query.execute()
+            counts[keyword] = res.count or 0
+
+        # Build result box
+        lines = []
+        lines.append("╔══════════════════════════════╗")
+        lines.append("║     🔍 LINES STATUS CHECK     ║")
+        lines.append("╠══════════════════════════════╣")
+
+        for keyword in KEYWORDS:
+            label = keyword[:20].ljust(20)
+            count = str(counts[keyword]).rjust(4)
+            lines.append(f"║ {label} {count} lines")
+
+        lines.append("╚══════════════════════════════╝")
+        await message.reply_text("\n".join(lines))
+    except Exception as e:
+        await message.reply_text(f"❌ Error: {str(e)}")
+
 app.run()
