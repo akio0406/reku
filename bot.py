@@ -79,7 +79,7 @@ async def delete_key_entry(key):
     supabase.table("reku_keys").delete().eq("key", key).execute()
 
 async def get_user_key_info(user_id):
-    keys = await get_all_keys()
+    keys = get_all_keys()
     for info in keys:
         if str(info.get("redeemed_by")) == str(user_id):
             return info["key"], info
@@ -87,7 +87,7 @@ async def get_user_key_info(user_id):
 
 
 async def check_user_access(user_id: int):
-    keys = await get_all_keys()
+    keys = get_all_keys()
     for key in keys:
         if str(key.get("redeemed_by")) == str(user_id):
             try:
@@ -188,7 +188,7 @@ def format_duration(duration_str):
         return duration_str
 
 async def check_user_access(user_id: int):
-    keys = await get_all_keys()
+    keys = get_all_keys()
     for key in keys:
         if str(key.get("redeemed_by")) == str(user_id):
             try:
@@ -223,7 +223,7 @@ async def redeem_key(client, message):
         return await message.reply("⚠️ Key has invalid expiry date")
     
     # Check if user already has a redeemed key
-    keys = await get_all_keys()
+    keys = get_all_keys()
     for existing in keys:
         if existing["redeemed_by"] == message.from_user.id:
             return await message.reply(
@@ -416,7 +416,7 @@ async def redeem_help(client, callback_query):
 
 @app.on_message(filters.command("users") & filters.user(ADMIN_ID))
 async def list_users(client, message):
-    keys = await get_all_keys()
+    keys = get_all_keys()
     users = {}
     
     for info in keys:
@@ -592,7 +592,7 @@ async def confirm_masskey(client, callback_query):
 
     delta = parse_duration(duration_str)
     expiry = (datetime.datetime.now() + delta).isoformat()
-    keys = await get_all_keys()
+    keys = get_all_keys()
     
     generated_keys = []
     for _ in range(quantity):
@@ -662,7 +662,7 @@ async def broadcast_message(client, message):
         return await message.reply("❌ Usage: /broadcast <message>")
     
     broadcast_text = message.text.split(maxsplit=1)[1]
-    keys = await get_all_keys()
+    keys = get_all_keys()
 
     # Extract unique user IDs from redeemed keys
     users = {str(info["redeemed_by"]) for info in keys if info.get("redeemed_by")}
@@ -1641,7 +1641,7 @@ async def user_activity_command(client, message):
 @app.on_message(filters.command("activeusers") & filters.user(ADMIN_ID))
 async def active_users_command(client, message):
     activities = load_activity_log()
-    keys = await get_all_keys()  # expects a list of dicts
+    keys = get_all_keys()  # expects a list of dicts
 
     active_users = {}
 
