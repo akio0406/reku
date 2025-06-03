@@ -21,7 +21,8 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+admin_ids = os.getenv("ADMIN_ID", "").split(",")
+admin_ids = [int(id.strip()) for id in admin_ids if id.strip()]
 
 # --- Supabase Client ---
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -250,7 +251,7 @@ async def redeem_key(client, message):
         user_info += f" (@{user.username})" if user.username else ""
         
         await client.send_message(
-            chat_id=ADMIN_ID,
+            chat_id=admin_ids,
             text=(
                 "🔑 Key Redeemed Notification\n"
                 f"├─ Key: `{key}`\n"
@@ -414,7 +415,7 @@ async def redeem_help(client, callback_query):
     except Exception as e:
         await callback_query.message.reply_text(f"Error: {str(e)}")
 
-@app.on_message(filters.command("users") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("users") & filters.user(admin_ids))
 async def list_users(client, message):
     keys = get_all_keys()
     users = {}
@@ -472,7 +473,7 @@ async def list_users(client, message):
         await message.reply(message_text, parse_mode=enums.ParseMode.HTML)
 
 
-@app.on_message(filters.command("generate") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("generate") & filters.user(admin_ids))
 async def generate_key(client, message):
     args = message.text.split()
     if len(args) < 2:
@@ -496,7 +497,7 @@ async def generate_key(client, message):
         f"📅 Expires on: {expiry}"
     )
 
-@app.on_message(filters.command("masskey") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("masskey") & filters.user(admin_ids))
 async def mass_generate_keys(client, message):
     args = message.text.split()
     if len(args) < 3:
@@ -638,7 +639,7 @@ async def confirm_masskey(client, callback_query):
 async def cancel_masskey(client, callback_query):
     await callback_query.message.edit_text("❌ Mass key generation cancelled")
 
-@app.on_message(filters.command("remove") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("remove") & filters.user(admin_ids))
 async def remove_license(client, message):
     args = message.text.split()
     if len(args) != 2:
@@ -656,7 +657,7 @@ async def remove_license(client, message):
     except Exception as e:
         await message.reply(f"❌ Error: {str(e)}")
 
-@app.on_message(filters.command("broadcast") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("broadcast") & filters.user(admin_ids))
 async def broadcast_message(client, message):
     if len(message.command) < 2:
         return await message.reply("❌ Usage: /broadcast <message>")
@@ -765,7 +766,7 @@ async def process_payment_proof(client, message):
     try:
         if file_type == "photo":
             await client.send_photo(
-                chat_id=ADMIN_ID,
+                chat_id=admin_ids,
                 photo=file_id,
                 caption=payment_msg,
                 reply_markup=keyboard,
@@ -773,7 +774,7 @@ async def process_payment_proof(client, message):
             )
         else:
             await client.send_document(
-                chat_id=ADMIN_ID,
+                chat_id=admin_ids,
                 document=file_id,
                 caption=payment_msg,
                 reply_markup=keyboard,
@@ -790,7 +791,7 @@ async def process_payment_proof(client, message):
     finally:
         user_state.pop(user_id, None)
 
-@app.on_message(filters.command("payments") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("payments") & filters.user(admin_ids))
 async def list_payments(client, message):
     payments = load_payments()
     if not payments:
@@ -842,7 +843,7 @@ async def accept_payment(client, callback_query):
         "Example: `30d` for 30 days"
     )
 
-@app.on_message(filters.text & filters.user(ADMIN_ID) & AuthenticatedUser())
+@app.on_message(filters.text & filters.user(admin_ids) & AuthenticatedUser())
 async def process_key_duration(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -926,7 +927,7 @@ async def reject_payment(client, callback_query):
         "Please send the reason for rejection (this will be sent to the user):"
     )
 
-@app.on_message(filters.text & filters.user(ADMIN_ID) & AuthenticatedUser())
+@app.on_message(filters.text & filters.user(admin_ids) & AuthenticatedUser())
 async def process_reject_reason(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -980,13 +981,13 @@ async def view_payment(client, callback_query):
     try:
         if payment["file_type"] == "photo":
             await client.send_photo(
-                chat_id=ADMIN_ID,
+                chat_id=admin_ids,
                 photo=payment["file_id"],
                 caption=f"🔄 Resent payment proof: {payment_id}"
             )
         else:
             await client.send_document(
-                chat_id=ADMIN_ID,
+                chat_id=admin_ids,
                 document=payment["file_id"],
                 caption=f"🔄 Resent payment proof: {payment_id}"
             )
@@ -1029,7 +1030,7 @@ async def cancel_command(client, message):
     else:
         await message.reply("ℹ️ No active operation to cancel.")
 
-@app.on_message(filters.command("deleteallkeys") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("deleteallkeys") & filters.user(admin_ids))
 async def delete_all_keys(client, message):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔥 YES, DELETE ALL KEYS", callback_data="confirm_delete_all_keys")],
@@ -1362,21 +1363,21 @@ async def process_feedback(client, message):
     try:
         if message.photo:
             await client.send_photo(
-                chat_id=ADMIN_ID,
+                chat_id=admin_ids,
                 photo=message.photo.file_id,
                 caption=feedback_msg,
                 parse_mode=enums.ParseMode.MARKDOWN
             )
         elif message.video:
             await client.send_video(
-                chat_id=ADMIN_ID,
+                chat_id=admin_ids,
                 video=message.video.file_id,
                 caption=feedback_msg,
                 parse_mode=enums.ParseMode.MARKDOWN
             )
         else:
             await client.send_message(
-                chat_id=ADMIN_ID,
+                chat_id=admin_ids,
                 text=feedback_msg,
                 parse_mode=enums.ParseMode.MARKDOWN
             )
@@ -1393,7 +1394,7 @@ async def restricted(_, __, message: Message):
     if await check_user_access(user_id):
         return True
 
-    if user_id == ADMIN_ID:
+    if user_id == admin_ids:
         return True
 
     now = time.time()
@@ -1583,7 +1584,7 @@ async def copy_results_text(client, callback_query):
         parse_mode="HTML"
     )
 
-@app.on_message(filters.command("useractivity") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("useractivity") & filters.user(admin_ids))
 async def user_activity_command(client, message):
     args = message.text.split()
     if len(args) < 2:
@@ -1638,7 +1639,7 @@ async def user_activity_command(client, message):
         await message.reply(response_text)
 
 
-@app.on_message(filters.command("activeusers") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("activeusers") & filters.user(admin_ids))
 async def active_users_command(client, message):
     activities = load_activity_log()
     keys = get_all_keys()  # expects a list of dicts
