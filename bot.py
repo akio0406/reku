@@ -1205,7 +1205,7 @@ async def merge_command(client, message):
     )
 
 
-@app.on_message(filters.document & filters.create(AuthenticatedUser()))
+@app.on_message(filters.document & AuthenticatedUser())
 async def process_merge_file(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
