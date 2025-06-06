@@ -1144,6 +1144,7 @@ async def feedback_command(client, message):
         "Type /cancel to abort."
     )
 
+
 @app.on_message((filters.text | filters.photo | filters.video))
 async def process_feedback(client, message):
     if not message.from_user:
@@ -1172,6 +1173,34 @@ async def process_feedback(client, message):
     )
 
     try:
+        for admin_id in admin_ids:
+            if message.photo:
+                await client.send_photo(
+                    chat_id=admin_id,
+                    photo=message.photo.file_id,
+                    caption=feedback_msg,
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
+            elif message.video:
+                await client.send_video(
+                    chat_id=admin_id,
+                    video=message.video.file_id,
+                    caption=feedback_msg,
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
+            else:
+                await client.send_message(
+                    chat_id=admin_id,
+                    text=feedback_msg,
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
+
+        await message.reply("✅ Your feedback has been sent to the admin. Thank you!")
+    except Exception as e:
+        await message.reply(f"❌ Failed to send feedback: {str(e)}")
+    finally:
+        user_state.pop(user_id, None)
+
        
 
 async def restricted(_, __, message: Message):
