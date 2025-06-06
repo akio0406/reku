@@ -565,7 +565,7 @@ async def confirm_masskey(client, callback_query):
 
     delta = parse_duration(duration_str)
     expiry = (datetime.datetime.now() + delta).isoformat()
-    keys = await get_all_keys()  ✅
+    keys = await get_all_keys()  
     
     generated_keys = []
     for _ in range(quantity):
