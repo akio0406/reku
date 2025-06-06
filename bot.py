@@ -1715,3 +1715,73 @@ async def check_lines(_, message: Message):
         await message.reply_text(f"❌ Error: {str(e)}")
 
 app.run()
+
+
+# --- Merge command handler ---
+@app.on_message(filters.command("merge") & AuthenticatedUser())
+async def start_merge(client, message):
+    user_id = message.from_user.id
+    user_state[user_id] = {
+        "action": "awaiting_merge_files",
+        "files": [],
+        "file_names": [],
+        "timestamp": time.time()
+    }
+    await message.reply("📎 Send me the `.txt` files you want to merge.
+When you're done, type /done.")
+
+# --- Handle each .txt upload during merge session ---
+@app.on_message(filters.document & AuthenticatedUser())
+async def handle_merge_file(client, message):
+    user_id = message.from_user.id
+    state = user_state.get(user_id)
+
+    if not state or state.get("action") != "awaiting_merge_files":
+        return
+
+    doc = message.document
+    if not doc.file_name.endswith(".txt"):
+        await message.reply("❌ Only .txt files are accepted.")
+        return
+
+    os.makedirs("Temp", exist_ok=True)
+    file_path = f"Temp/{user_id}_{int(time.time())}_{doc.file_name}"
+    await message.download(file_path)
+    state["files"].append(file_path)
+    state["file_names"].append(doc.file_name)
+    await message.reply(f"✅ Added file: <code>{doc.file_name}</code>", parse_mode=ParseMode.HTML)
+
+# --- Finalize merge on /done ---
+@app.on_message(filters.command("done") & AuthenticatedUser())
+async def finalize_merge(client, message):
+    user_id = message.from_user.id
+    state = user_state.get(user_id)
+
+    if not state or not state.get("files"):
+        await message.reply("❌ No files found to merge. Start with /merge.")
+        return
+
+    all_lines = set()
+    for file_path in state["files"]:
+        with open(file_path, "r", encoding="utf-8") as f:
+            all_lines.update(line.strip() for line in f)
+
+    os.makedirs("Generated", exist_ok=True)
+    merged_filename = f"merged_{user_id}_{int(time.time())}.txt"
+    merged_path = f"Generated/{merged_filename}"
+
+    with open(merged_path, "w", encoding="utf-8") as f:
+        for line in sorted(all_lines):
+            f.write(line + "\n")
+
+    await message.reply_document(
+        merged_path,
+        caption=f"✅ Merged {len(state['files'])} files.
+📄 Unique lines: {len(all_lines)}"
+    )
+
+    for path in state["files"]:
+        if os.path.exists(path):
+            os.remove(path)
+
+    del user_state[user_id]
