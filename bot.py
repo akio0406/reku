@@ -1715,6 +1715,7 @@ async def check_lines(_, message: Message):
         await message.reply_text(f"❌ Error: {str(e)}")
 
 # --- Merge command handler ---
+# --- Start merge session ---
 @app.on_message(filters.command("merge"))
 async def start_merge(client, message):
     user_id = message.from_user.id
@@ -1729,8 +1730,11 @@ async def start_merge(client, message):
         "timestamp": time.time()
     }
     await message.reply("📎 Send the `.txt` files to merge.\nThen type /done.")
+    return  # stop propagation
+
 
 # --- Handle each .txt upload during merge session ---
+# --- Handle each .txt file sent by admin ---
 @app.on_message(filters.document)
 async def handle_merge_file(client, message):
     user_id = message.from_user.id
@@ -1751,9 +1755,15 @@ async def handle_merge_file(client, message):
     await message.download(file_path)
     state["files"].append(file_path)
     state["file_names"].append(doc.file_name)
-    await message.reply(f"✅ Added file: <code>{doc.file_name}</code>", parse_mode=ParseMode.HTML)
+
+    await message.reply(
+        f"✅ Added file: <code>{doc.file_name}</code>",
+        parse_mode=ParseMode.HTML
+    )
+    return  # avoid fallthrough to unauthorized handler
 
 # --- Finalize merge on /done ---
+# --- Finalize with /done ---
 @app.on_message(filters.command("done"))
 async def finalize_merge(client, message):
     user_id = message.from_user.id
@@ -1784,10 +1794,12 @@ async def finalize_merge(client, message):
         caption=f"✅ Merged {len(state['files'])} files.\n📄 Unique lines: {len(all_lines)}"
     )
 
+    # Cleanup
     for path in state["files"]:
         if os.path.exists(path):
             os.remove(path)
 
     del user_state[user_id]
+    return  # avoid other handlers
 
 app.run()
