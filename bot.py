@@ -1410,8 +1410,8 @@ async def search_command(client, message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.reply(
-            "❌ Please provide a keyword.\nUsage: `/search <keyword>`",
-            parse_mode="markdown"
+            "❌ Please provide a keyword.<br>Usage: <code>/search &lt;keyword&gt;</code>",
+            parse_mode="html"
         )
         return
 
@@ -1421,9 +1421,9 @@ async def search_command(client, message):
         [InlineKeyboardButton("🌍 Include URLs", callback_data=f"format_{keyword}_full")]
     ])
     await message.reply(
-        f"🔎 Keyword: `{keyword}`\nChoose output format:",
+        f"🔎 Keyword: <code>{keyword}</code><br>Choose output format:",
         reply_markup=keyboard,
-        parse_mode="markdown"
+        parse_mode="html"
     )
 
 
@@ -1433,7 +1433,7 @@ async def perform_search(client, callback_query):
     _, keyword, fmt = callback_query.data.split("_", 2)
     include_urls = fmt == "full"
     await callback_query.answer("🔍 Searching...", show_alert=False)
-    msg = await callback_query.message.edit_text(f"🔍 Searching `{keyword}`...")
+    msg = await callback_query.message.edit_text(f"🔍 Searching <code>{keyword}</code>...", parse_mode="html")
 
     try:
         res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
@@ -1486,12 +1486,12 @@ async def perform_search(client, callback_query):
     ])
 
     await msg.edit_text(
-        f"🔎 **Results for:** `{keyword}`\n"
-        f"📄 **Format:** {label}\n"
-        f"📌 **Results:** `{len(selected)}`\n\n"
-        f"🔹 **Preview:**\n```\n{preview}\n```",
+        f"🔎 <b>Results for:</b> <code>{keyword}</code><br>"
+        f"📄 <b>Format:</b> {label}<br>"
+        f"📌 <b>Results:</b> <code>{len(selected)}</code><br><br>"
+        f"🔹 <b>Preview:</b><br><pre>{preview}</pre>",
         reply_markup=keyboard,
-        parse_mode="markdown"
+        parse_mode="html"
     )
 
 
@@ -1526,9 +1526,8 @@ async def copy_results_text(client, callback_query):
         content = content[:4090] + "...\n[Truncated]"
     await callback_query.message.reply(
         f"🔎 <b>Results for:</b> <code>{keyword}</code>\n\n<pre>{content}</pre>",
-        parse_mode="HTML"
+        parse_mode="html"
     )
-
 
 @app.on_message(filters.command("useractivity") & filters.user(admin_ids))
 async def user_activity_command(client, message):
