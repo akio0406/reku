@@ -1408,7 +1408,7 @@ async def user_activity_command(client, message):
 @app.on_message(filters.command("activeusers") & filters.user(admin_ids))
 async def active_users_command(client, message):
     try:
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc)
         print("🔍 /activeusers called — UTC now:", now)
 
         # Supabase query
