@@ -1783,3 +1783,5 @@ async def finalize_merge(client, message):
             os.remove(path)
 
     del user_state[user_id]
+
+app.run()
