@@ -50,7 +50,7 @@ async def get_key_entry(key):
     return res.data[0] if res.data else None
 
 async def insert_key_entry(key, expiry, owner_id, duration):
-    supabase.table("reku_keys").insert({
+    await supabase.table("reku_keys").insert({
         "key": key,
         "expiry": expiry,
         "owner_id": owner_id,
@@ -74,7 +74,7 @@ async def get_user_key_info(user_id):
 
 async def check_user_access(user_id: int):
     try:
-        keys = get_all_keys()
+        keys = await get_all_keys()
         for key in keys:
             if str(key.get("redeemed_by")) == str(user_id):
                 expiry = datetime.datetime.fromisoformat(key["expiry"])
