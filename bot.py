@@ -1727,8 +1727,7 @@ async def start_merge(client, message):
         "file_names": [],
         "timestamp": time.time()
     }
-    await message.reply("📎 Send me the `.txt` files you want to merge.
-When you're done, type /done.")
+    await message.reply("📎 Send me the `.txt` files you want to merge.\nWhen you're done, type /done.")
 
 # --- Handle each .txt upload during merge session ---
 @app.on_message(filters.document & AuthenticatedUser())
@@ -1776,8 +1775,7 @@ async def finalize_merge(client, message):
 
     await message.reply_document(
         merged_path,
-        caption=f"✅ Merged {len(state['files'])} files.
-📄 Unique lines: {len(all_lines)}"
+        caption=f"✅ Merged {len(state['files'])} files.\n📄 Unique lines: {len(all_lines)}"
     )
 
     for path in state["files"]:
