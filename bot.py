@@ -1242,9 +1242,7 @@ async def perform_search(client, callback_query):
     )
 
     try:
-        # ✅ Run Supabase query safely in async context
-        loop = asyncio.get_running_loop()
-        res = await loop.run_in_executor(None, lambda: await supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute())
+        res = await supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
         entries = [row["line"] for row in res.data] if res.data else []
 
     except Exception as e:
