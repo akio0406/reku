@@ -1503,4 +1503,3 @@ async def handle_uploaded_document(client, message: Message):
                 os.remove("results_removedurl.txt")
 
 app.run()
-
