@@ -1409,7 +1409,10 @@ async def restricted(_, __, message: Message):
 async def search_command(client, message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply("❌ Please provide a keyword.\nUsage: `/search <keyword>`", parse_mode="Markdown")
+        await message.reply(
+            "❌ Please provide a keyword.\nUsage: `/search <keyword>`",
+            parse_mode="markdown"
+        )
         return
 
     keyword = args[1].strip()
@@ -1420,8 +1423,9 @@ async def search_command(client, message):
     await message.reply(
         f"🔎 Keyword: `{keyword}`\nChoose output format:",
         reply_markup=keyboard,
-        parse_mode="Markdown"
+        parse_mode="markdown"
     )
+
 
 # --- Handle format selection ---
 @app.on_callback_query(filters.regex("^format_"))
@@ -1486,8 +1490,10 @@ async def perform_search(client, callback_query):
         f"📄 **Format:** {label}\n"
         f"📌 **Results:** `{len(selected)}`\n\n"
         f"🔹 **Preview:**\n```\n{preview}\n```",
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="markdown"
     )
+
 
 # --- Send .txt file ---
 @app.on_callback_query(filters.regex("^download_results_"))
@@ -1502,6 +1508,7 @@ async def download_results_file(client, callback_query):
         document=filepath,
         caption="📄 Here are your results."
     )
+
 
 # --- Send text preview ---
 @app.on_callback_query(filters.regex("^copy_code_"))
@@ -1521,6 +1528,7 @@ async def copy_results_text(client, callback_query):
         f"🔎 <b>Results for:</b> <code>{keyword}</code>\n\n<pre>{content}</pre>",
         parse_mode="HTML"
     )
+
 
 @app.on_message(filters.command("useractivity") & filters.user(admin_ids))
 async def user_activity_command(client, message):
