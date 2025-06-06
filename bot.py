@@ -41,15 +41,15 @@ class AuthenticatedUser(Filter):
         return await check_user_access(message.from_user.id)
 
 # --- Supabase Key Management (Final Version) ---
-async def get_all_keys():
+def get_all_keys():
     res = supabase.table("reku_keys").select("*").execute()
     return res.data if res.data else []
 
-async def get_key_entry(key):
+def get_key_entry(key):
     res = supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
     return res.data[0] if res.data else None
 
-async def insert_key_entry(key, expiry, owner_id, duration):
+def insert_key_entry(key, expiry, owner_id, duration):
     supabase.table("reku_keys").insert({
         "key": key,
         "expiry": expiry,
@@ -58,13 +58,13 @@ async def insert_key_entry(key, expiry, owner_id, duration):
         "created": datetime.datetime.now().isoformat()
     }).execute()
 
-async def update_key_redeemed_by(key, user_id):
+def update_key_redeemed_by(key, user_id):
     supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
 
-async def delete_key_entry(key):
+def delete_key_entry(key):
     supabase.table("reku_keys").delete().eq("key", key).execute()
 
-async def get_user_key_info(user_id):
+def get_user_key_info(user_id):
     keys = get_all_keys()  # ✅ Proper await
     for info in keys:
         if str(info.get("redeemed_by")) == str(user_id):
@@ -239,7 +239,7 @@ async def redeem_key(client, message):
 @app.on_message(filters.command("myinfo"))
 async def user_info(client, message):
     user_id = message.from_user.id
-    key, info = await get_user_key_info(user_id)
+    key, info = get_user_key_info(user_id)
 
     if not key:
         return await message.reply("ℹ️ You don't have an active subscription")
