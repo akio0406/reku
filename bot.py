@@ -1257,13 +1257,12 @@ async def perform_search(client, callback_query):
 
     try:
         res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
-        entries = [row["line"] for row in res.data] if res.data else []
+        if not res.data:
+            await msg.edit_text(f"❌ No matches found in the database for <code>{keyword}</code>.", parse_mode=ParseMode.HTML)
+            return
+        entries = [row["line"] for row in res.data]
     except Exception as e:
         await msg.edit_text(f"❌ Supabase error: {str(e)}")
-        return
-
-    if not entries:
-        await msg.edit_text("❌ No matches found.")
         return
 
     results = set()
@@ -1274,25 +1273,19 @@ async def perform_search(client, callback_query):
                 line = ":".join(parts[-2:])
         results.add(line.strip())
 
-    existing_lines = []
+    # Skip deduplication for now to ensure everything shows
+    filtered = list(results)
+
+    if not filtered:
+        await msg.edit_text("❌ No valid results found.")
+        return
+
+    selected = random.sample(filtered, min(len(filtered), random.randint(100, 150)))
+
     os.makedirs("Generated", exist_ok=True)
     result_filename = f"{keyword}_{int(time.time())}.txt"
     result_path = os.path.join("Generated", result_filename)
 
-    if os.path.exists(result_path):
-        with open(result_path, "r", encoding="utf-8") as f:
-            existing_lines = [line.strip() for line in f]
-
-    line_counts = Counter(existing_lines)
-    filtered = [r for r in results if line_counts[r] < 2]
-    for r in filtered:
-        line_counts[r] += 1
-
-    if not filtered:
-        await msg.edit_text("❌ No new valid results (limit reached per line).")
-        return
-
-    selected = random.sample(filtered, min(len(filtered), random.randint(100, 150)))
     with open(result_path, "w", encoding="utf-8") as f:
         for line in selected:
             f.write(f"{line}\n")
