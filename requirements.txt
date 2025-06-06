@@ -1,6 +1,6 @@
-pyrogram
+pyrogram==2.0.106
 tgcrypto
 pytz
 requests
-supabase
+supabase==1.0.3
 pycryptodome
