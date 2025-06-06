@@ -1192,12 +1192,15 @@ async def restricted(_, __, message: Message):
     return True
 
 # --- /search <keyword> handler ---
+from pyrogram.enums import ParseMode
+
+# --- /search <keyword> handler ---
 @app.on_message(filters.command("search") & filters.create(restricted))
 async def search_command(client, message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.reply(
-            "❌ Please provide a keyword.\nUsage: <code>/search &lt;keyword&gt;</code>",
+            "❌ Please provide a keyword.<br>Usage: <code>/search &lt;keyword&gt;</code>",
             parse_mode=ParseMode.HTML
         )
         return
@@ -1208,81 +1211,82 @@ async def search_command(client, message):
         [InlineKeyboardButton("🌍 Include URLs", callback_data=f"format_{keyword}_full")]
     ])
     await message.reply(
-        f"🔎 Keyword: <code>{keyword}</code>\nChoose output format:",
+        f"🔎 Keyword: <code>{keyword}</code><br>Choose output format:",
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
 
+
 # --- Handle format selection ---
 @app.on_callback_query(filters.regex("^format_"))
 async def perform_search(client, callback_query):
+    _, keyword, fmt = callback_query.data.split("_", 2)
+    include_urls = fmt == "full"
+    await callback_query.answer("🔍 Searching...", show_alert=False)
+    msg = await callback_query.message.edit_text(
+        f"🔍 Searching <code>{keyword}</code>...",
+        parse_mode=ParseMode.HTML
+    )
+
     try:
-        _, keyword, fmt = callback_query.data.split("_", 2)
-        include_urls = fmt == "full"
-
-        await callback_query.answer("🔍 Searching...", show_alert=False)
-        msg = await callback_query.message.edit_text(
-            f"🔍 Searching <code>{keyword}</code>...",
-            parse_mode=ParseMode.HTML
-        )
-
-        res = await supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
-
-        if not res.data:
-            await msg.edit_text(
-                f"❌ No matches found for <code>{keyword}</code>.",
-                parse_mode=ParseMode.HTML
-            )
-            return
-
-        entries = [row["line"] for row in res.data]
-
-        results = set()
-        for line in entries:
-            if not include_urls:
-                parts = line.split(":")
-                if len(parts) >= 2:
-                    line = ":".join(parts[-2:])
-            results.add(line.strip())
-
-        filtered = list(results)
-
-        if not filtered:
-            await msg.edit_text("❌ No valid results found.")
-            return
-
-        selected = random.sample(filtered, min(len(filtered), random.randint(100, 150)))
-
-        os.makedirs("Generated", exist_ok=True)
-        result_filename = f"{keyword}_{int(time.time())}.txt"
-        result_path = os.path.join("Generated", result_filename)
-
-        with open(result_path, "w", encoding="utf-8") as f:
-            for line in selected:
-                f.write(f"{line}\n")
-
-        preview = "\n".join(selected[:5]) + ("\n..." if len(selected) > 5 else "")
-        label = "🌍 Full (URLs)" if include_urls else "✅ User:Pass only"
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📥 Download Results", callback_data=f"download_results_{result_filename}")],
-            [InlineKeyboardButton("📋 Copy Code", callback_data=f"copy_code_{result_filename}_{keyword}")]
-        ])
-
-        await msg.edit_text(
-            f"🔎 <b>Results for:</b> <code>{keyword}</code>\n"
-            f"📄 <b>Format:</b> {label}\n"
-            f"📌 <b>Results:</b> <code>{len(selected)}</code>\n\n"
-            f"🔹 <b>Preview:</b>\n<pre>{preview}</pre>",
-            reply_markup=keyboard,
-            parse_mode=ParseMode.HTML
-        )
-
+        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
+        entries = [row["line"] for row in res.data] if res.data else []
     except Exception as e:
-        await callback_query.message.edit_text(
-            f"❌ Error: {e}",
-            parse_mode=ParseMode.HTML
-        )
+        await msg.edit_text(f"❌ Supabase error: {str(e)}")
+        return
+
+    if not entries:
+        await msg.edit_text("❌ No matches found.")
+        return
+
+    results = set()
+    for line in entries:
+        if not include_urls:
+            parts = line.split(":")
+            if len(parts) >= 2:
+                line = ":".join(parts[-2:])
+        results.add(line.strip())
+
+    existing_lines = []
+    os.makedirs("Generated", exist_ok=True)
+    result_filename = f"{keyword}_{int(time.time())}.txt"
+    result_path = os.path.join("Generated", result_filename)
+
+    if os.path.exists(result_path):
+        with open(result_path, "r", encoding="utf-8") as f:
+            existing_lines = [line.strip() for line in f]
+
+    line_counts = Counter(existing_lines)
+    filtered = [r for r in results if line_counts[r] < 2]
+    for r in filtered:
+        line_counts[r] += 1
+
+    if not filtered:
+        await msg.edit_text("❌ No new valid results (limit reached per line).")
+        return
+
+    selected = random.sample(filtered, min(len(filtered), random.randint(100, 150)))
+    with open(result_path, "w", encoding="utf-8") as f:
+        for line in selected:
+            f.write(f"{line}\n")
+
+    preview = "\n".join(selected[:5]) + ("\n..." if len(selected) > 5 else "")
+    label = "🌍 Full (URLs)" if include_urls else "✅ User:Pass only"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📥 Download Results", callback_data=f"download_results_{result_filename}")],
+        [InlineKeyboardButton("📋 Copy Code", callback_data=f"copy_code_{result_filename}_{keyword}")]
+    ])
+
+    await msg.edit_text(
+        f"🔎 <b>Results for:</b> <code>{keyword}</code><br>"
+        f"📄 <b>Format:</b> {label}<br>"
+        f"📌 <b>Results:</b> <code>{len(selected)}</code><br><br>"
+        f"🔹 <b>Preview:</b><br><pre>{preview}</pre>",
+        reply_markup=keyboard,
+        parse_mode=ParseMode.HTML
+    )
+
 
 # --- Send .txt file ---
 @app.on_callback_query(filters.regex("^download_results_"))
@@ -1297,6 +1301,7 @@ async def download_results_file(client, callback_query):
         document=filepath,
         caption="📄 Here are your results."
     )
+
 
 # --- Send text preview ---
 @app.on_callback_query(filters.regex("^copy_code_"))
@@ -1316,6 +1321,7 @@ async def copy_results_text(client, callback_query):
         f"🔎 <b>Results for:</b> <code>{keyword}</code>\n\n<pre>{content}</pre>",
         parse_mode=ParseMode.HTML
     )
+
 
 # Match the search UI buttons
 KEYWORDS = [
