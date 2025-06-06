@@ -1404,6 +1404,8 @@ async def restricted(_, __, message: Message):
     search_cooldowns[user_id] = now
     return True
 
+from pyrogram.enums import ParseMode
+
 # --- /search <keyword> handler ---
 @app.on_message(filters.command("search") & filters.create(restricted))
 async def search_command(client, message):
@@ -1411,7 +1413,7 @@ async def search_command(client, message):
     if len(args) < 2:
         await message.reply(
             "❌ Please provide a keyword.<br>Usage: <code>/search &lt;keyword&gt;</code>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
         return
 
@@ -1423,7 +1425,7 @@ async def search_command(client, message):
     await message.reply(
         f"🔎 Keyword: <code>{keyword}</code><br>Choose output format:",
         reply_markup=keyboard,
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1433,7 +1435,10 @@ async def perform_search(client, callback_query):
     _, keyword, fmt = callback_query.data.split("_", 2)
     include_urls = fmt == "full"
     await callback_query.answer("🔍 Searching...", show_alert=False)
-    msg = await callback_query.message.edit_text(f"🔍 Searching <code>{keyword}</code>...", parse_mode="html")
+    msg = await callback_query.message.edit_text(
+        f"🔍 Searching <code>{keyword}</code>...",
+        parse_mode=ParseMode.HTML
+    )
 
     try:
         res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
@@ -1491,7 +1496,7 @@ async def perform_search(client, callback_query):
         f"📌 <b>Results:</b> <code>{len(selected)}</code><br><br>"
         f"🔹 <b>Preview:</b><br><pre>{preview}</pre>",
         reply_markup=keyboard,
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1526,8 +1531,9 @@ async def copy_results_text(client, callback_query):
         content = content[:4090] + "...\n[Truncated]"
     await callback_query.message.reply(
         f"🔎 <b>Results for:</b> <code>{keyword}</code>\n\n<pre>{content}</pre>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
+
 
 @app.on_message(filters.command("useractivity") & filters.user(admin_ids))
 async def user_activity_command(client, message):
