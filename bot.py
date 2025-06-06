@@ -5,14 +5,20 @@ import time
 import random
 import asyncio
 import datetime
-import pytz
 import base64
+from collections import Counter, defaultdict
+from uuid import uuid4
+from datetime import timezone
+
+import pytz
 import requests
-from collections import Counter
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
+
 from pyrogram import Client, filters, enums
+from pyrogram.enums import ParseMode
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+
 from supabase import create_client
 
 # --- Environment Variables ---
@@ -33,23 +39,6 @@ from pyrogram.filters import Filter
 class AuthenticatedUser(Filter):
     async def __call__(self, client, message):
         return await check_user_access(message.from_user.id)
-
-
-# --- Supabase-based key functions ---
-async def get_key_entry(key):
-    res = supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
-    return res.data[0] if res.data else None
-
-async def insert_key_entry(key, expiry, owner_id):
-    supabase.table("reku_keys").insert({"key": key, "expiry": expiry, "owner_id": owner_id}).execute()
-
-async def update_key_redeemed_by(key, user_id):
-    supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
-
-async def delete_key_entry(key):
-    supabase.table("reku_keys").delete().eq("key", key).execute()
-
-
 
 # --- Supabase Key Management (Final Version) ---
 def get_all_keys():
@@ -183,19 +172,6 @@ def format_duration(duration_str):
             return duration_str
     except ValueError:
         return duration_str
-
-async def check_user_access(user_id: int):
-    keys = get_all_keys()
-    for key in keys:
-        if str(key.get("redeemed_by")) == str(user_id):
-            try:
-                expiry = datetime.fromisoformat(key["expiry"])
-                if expiry > datetime.now(timezone.utc):  # ← FIXED
-                    return True
-            except Exception:
-                continue
-    return False
-
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
@@ -1215,12 +1191,6 @@ async def restricted(_, __, message: Message):
     search_cooldowns[user_id] = now
     return True
 
-from pyrogram.enums import ParseMode
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import os
-import time
-import random
-
 # --- /search <keyword> handler ---
 @app.on_message(filters.command("search") & filters.create(restricted))
 async def search_command(client, message):
@@ -1346,24 +1316,6 @@ async def copy_results_text(client, callback_query):
         f"🔎 <b>Results for:</b> <code>{keyword}</code>\n\n<pre>{content}</pre>",
         parse_mode=ParseMode.HTML
     )
-
-
-from uuid import uuid4
-import datetime
-from pyrogram import enums
-
-# --- Log user action to Supabase ---
-async def log_user_action(user_id: int, action: str):
-    try:
-        await supabase.table("user_activity_log").insert({
-            "id": str(uuid4()),
-            "user_id": user_id,
-            "action": action
-        }).execute()
-    except Exception as e:
-        print(f"❌ Failed to log user action: {e}")
-
-from collections import defaultdict
 
 # Match the search UI buttons
 KEYWORDS = [
