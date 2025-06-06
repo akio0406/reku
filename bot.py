@@ -1198,36 +1198,30 @@ async def restricted(_, __, message: Message):
         await message.reply("❌ Access check failed.")
         return False
 
-# --- /search <keyword> command ---
-@app.on_message(filters.command("search"))
+from pyrogram.enums import ParseMode
+
+# --- /search <keyword> handler ---
+@app.on_message(filters.command("search") & filters.create(restricted))
 async def search_command(client, message):
-    print(f"[SEARCH] From: {message.from_user.id}, Message: {message.text}")
-
-    if not await restricted(client, None, message):
-        print(f"[SEARCH] Access denied for {message.from_user.id}")
-        return await message.reply("⛔ You don't have access to this command.")
-
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        print(f"[SEARCH] No keyword provided.")
-        return await message.reply(
-            "❌ Please provide a keyword.\nUsage: <code>/search &lt;keyword&gt;</code>",
+        await message.reply(
+            "❌ Please provide a keyword.<br>Usage: <code>/search &lt;keyword&gt;</code>",
             parse_mode=ParseMode.HTML
         )
+        return
 
     keyword = args[1].strip()
-    print(f"[SEARCH] Keyword: {keyword}")
-
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ User:Pass Only", callback_data=f"format_{keyword}_userpass")],
         [InlineKeyboardButton("🌍 Include URLs", callback_data=f"format_{keyword}_full")]
     ])
-
     await message.reply(
-        f"🔎 Keyword: <code>{keyword}</code>\nChoose output format:",
+        f"🔎 Keyword: <code>{keyword}</code><br>Choose output format:",
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
+
 
 # --- Handle format selection ---
 @app.on_callback_query(filters.regex("^format_"))
@@ -1235,20 +1229,17 @@ async def perform_search(client, callback_query):
     _, keyword, fmt = callback_query.data.split("_", 2)
     include_urls = fmt == "full"
     await callback_query.answer("🔍 Searching...", show_alert=False)
-
     msg = await callback_query.message.edit_text(
         f"🔍 Searching <code>{keyword}</code>...",
         parse_mode=ParseMode.HTML
     )
 
     try:
-        res = await supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
+        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
         entries = [row["line"] for row in res.data] if res.data else []
-
     except Exception as e:
         await msg.edit_text(f"❌ Supabase error: {str(e)}")
         return
-
 
     if not entries:
         await msg.edit_text("❌ No matches found.")
@@ -1336,7 +1327,6 @@ async def copy_results_text(client, callback_query):
         f"🔎 <b>Results for:</b> <code>{keyword}</code>\n\n<pre>{content}</pre>",
         parse_mode=ParseMode.HTML
     )
-
 
 # Match the search UI buttons
 KEYWORDS = [
