@@ -1059,64 +1059,6 @@ async def confirm_delete_all_keys(client, callback_query):
 async def cancel_delete_all_keys(client, callback_query):
     await callback_query.message.edit_text("❌ Key deletion cancelled.")
 
-@app.on_message(filters.command("removeurl"))
-async def remove_url_request(client, message: Message):
-    if not await check_user_access(message.from_user.id):
-        return await message.reply("❌ You are not authorized to use this command.")
-    
-    user_state[message.from_user.id] = {"action": "awaiting_file"}
-    await message.reply("📂 Send me the file. I'll remove the URLs!")
-
-@app.on_message(filters.document)
-async def process_remove_url(client, message: Message):
-    user_id = message.from_user.id
-
-    if not await check_user_access(user_id):
-        return await message.reply("❌ You are not authorized to use this command.")
-
-    state = user_state.get(user_id)
-    if not state or state.get("action") != "awaiting_file":
-        return
-
-    try:
-        file_path = await message.download()
-        
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-
-        cleaned = []
-        for line in lines:
-            line = line.strip()
-            if line:
-                parts = line.split(":")
-                if len(parts) >= 3:
-                    cleaned.append(f"{parts[-2]}:{parts[-1]}")
-                else:
-                    cleaned.append(line)
-
-        if cleaned == [line.strip() for line in lines if line.strip()]:
-            await message.reply("🤔 There were no URLs to remove!")
-            return
-
-        cleaned_path = "results_removedurl.txt"
-        with open(cleaned_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(cleaned))
-
-        await client.send_document(
-            chat_id=message.chat.id,
-            document=cleaned_path,
-            caption="✅ URLs removed from the file!"
-        )
-        
-    except Exception as e:
-        await message.reply(f"❌ Error processing file: {str(e)}")
-    finally:
-        user_state.pop(user_id, None)
-        if 'file_path' in locals() and os.path.exists(file_path):
-            os.remove(file_path)
-        if 'cleaned_path' in locals() and os.path.exists(cleaned_path):
-            os.remove(cleaned_path)
-
 @app.on_message(filters.command("countlines"))
 async def count_lines(client, message: Message):
     args = message.text.split()
@@ -1582,13 +1524,9 @@ async def check_lines(_, message: Message):
         await message.reply_text(f"❌ Error: {str(e)}")
 
 # --- Merge command handler ---
-# --- Start merge session ---
 @app.on_message(filters.command("merge"))
 async def start_merge(client, message):
     user_id = message.from_user.id
-    if user_id not in admin_ids:
-        await message.reply("❌ You are not authorized to use this command.")
-        return
 
     user_state[user_id] = {
         "action": "awaiting_merge_files",
@@ -1597,47 +1535,13 @@ async def start_merge(client, message):
         "timestamp": time.time()
     }
     await message.reply("📎 Send the `.txt` files to merge.\nThen type /done.")
-    return  # stop propagation
 
 
-# --- Handle each .txt upload during merge session ---
-@app.on_message(filters.document & filters.create(lambda _, __, m: user_state.get(m.from_user.id, {}).get("action") == "awaiting_merge_files"))
-async def handle_merge_file(client, message):
-    user_id = message.from_user.id
-    if user_id not in admin_ids:
-        return  # silently ignore non-admins
-
-    state = user_state.get(user_id)
-    if not state or state.get("action") != "awaiting_merge_files":
-        return
-
-    doc = message.document
-    if not doc.file_name.endswith(".txt"):
-        await message.reply("❌ Only .txt files are accepted.")
-        return
-
-    os.makedirs("Temp", exist_ok=True)
-    file_path = f"Temp/{user_id}_{int(time.time())}_{doc.file_name}"
-    await message.download(file_path)
-    state["files"].append(file_path)
-    state["file_names"].append(doc.file_name)
-
-    await message.reply(
-        f"✅ Added file: <code>{doc.file_name}</code>",
-        parse_mode=ParseMode.HTML
-    )
-    return  # avoid fallthrough to unauthorized handler
-
-# --- Finalize merge on /done ---
-# --- Finalize with /done ---
 @app.on_message(filters.command("done"))
 async def finalize_merge(client, message):
     user_id = message.from_user.id
-    if user_id not in admin_ids:
-        await message.reply("❌ You are not authorized to use this command.")
-        return
-
     state = user_state.get(user_id)
+
     if not state or not state.get("files"):
         await message.reply("❌ No files found to merge. Start with /merge.")
         return
@@ -1660,12 +1564,85 @@ async def finalize_merge(client, message):
         caption=f"✅ Merged {len(state['files'])} files.\n📄 Unique lines: {len(all_lines)}"
     )
 
-    # Cleanup
     for path in state["files"]:
         if os.path.exists(path):
             os.remove(path)
 
     del user_state[user_id]
-    return  # avoid other handlers
+
+
+@app.on_message(filters.command("removeurl"))
+async def remove_url_request(client, message: Message):
+    user_state[message.from_user.id] = {"action": "awaiting_file"}
+    await message.reply("📂 Send me the file. I'll remove the URLs!")
+
+
+@app.on_message(filters.document)
+async def handle_uploaded_document(client, message: Message):
+    user_id = message.from_user.id
+    state = user_state.get(user_id)
+
+    if not state:
+        return
+
+    # --- MERGE FILE HANDLER ---
+    if state.get("action") == "awaiting_merge_files":
+        doc = message.document
+        if not doc.file_name.endswith(".txt"):
+            await message.reply("❌ Only .txt files are accepted.")
+            return
+
+        os.makedirs("Temp", exist_ok=True)
+        file_path = f"Temp/{user_id}_{int(time.time())}_{doc.file_name}"
+        await message.download(file_path)
+        state["files"].append(file_path)
+        state["file_names"].append(doc.file_name)
+
+        await message.reply(
+            f"✅ Added file: <code>{doc.file_name}</code>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # --- REMOVE URL FILE HANDLER ---
+    if state.get("action") == "awaiting_file":
+        try:
+            file_path = await message.download()
+
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+
+            cleaned = []
+            for line in lines:
+                line = line.strip()
+                if line:
+                    parts = line.split(":")
+                    if len(parts) >= 3:
+                        cleaned.append(f"{parts[-2]}:{parts[-1]}")
+                    else:
+                        cleaned.append(line)
+
+            if cleaned == [line.strip() for line in lines if line.strip()]:
+                await message.reply("🤔 There were no URLs to remove!")
+                return
+
+            cleaned_path = "results_removedurl.txt"
+            with open(cleaned_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(cleaned))
+
+            await client.send_document(
+                chat_id=message.chat.id,
+                document=cleaned_path,
+                caption="✅ URLs removed from the file!"
+            )
+
+        except Exception as e:
+            await message.reply(f"❌ Error processing file: {str(e)}")
+        finally:
+            user_state.pop(user_id, None)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            if os.path.exists("results_removedurl.txt"):
+                os.remove("results_removedurl.txt")
 
 app.run()
