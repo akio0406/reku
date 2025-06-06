@@ -73,15 +73,15 @@ async def get_user_key_info(user_id):
 
 
 async def check_user_access(user_id: int):
-    keys = get_all_keys()
-    for key in keys:
-        if str(key.get("redeemed_by")) == str(user_id):
-            try:
-                expiry = datetime.fromisoformat(key["expiry"])
-                if expiry > datetime.now(timezone.utc):  # ← FIXED
+    try:
+        keys = get_all_keys()
+        for key in keys:
+            if str(key.get("redeemed_by")) == str(user_id):
+                expiry = datetime.datetime.fromisoformat(key["expiry"])
+                if expiry > datetime.datetime.now(datetime.timezone.utc):
                     return True
-            except Exception:
-                continue
+    except Exception as e:
+        print(f"[ERROR] check_user_access() failed: {e}")
     return False
     
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -1178,29 +1178,33 @@ async def process_feedback(client, message):
 async def restricted(_, __, message: Message):
     user_id = message.from_user.id
 
-    if await check_user_access(user_id):
-        return True
-    if user_id in admin_ids:
+    try:
+        if await check_user_access(user_id):
+            return True
+        if user_id in admin_ids:
+            return True
+
+        now = time.time()
+        last_search = search_cooldowns.get(user_id, 0)
+        if now - last_search < 60:
+            await message.reply("⏳ Please wait before using this command again.")
+            return False
+
+        search_cooldowns[user_id] = now
         return True
 
-    now = time.time()
-    last_search = search_cooldowns.get(user_id, 0)
-    if now - last_search < 60:
+    except Exception as e:
+        print(f"[ERROR] restricted() failed: {e}")
+        await message.reply("❌ Access check failed.")
         return False
 
-    search_cooldowns[user_id] = now
-    return True
-
-# --- /search <keyword> handler ---
-from pyrogram.enums import ParseMode
-
-# --- /search <keyword> handler ---
+# --- /search <keyword> command ---
 @app.on_message(filters.command("search") & filters.create(restricted))
 async def search_command(client, message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.reply(
-            "❌ Please provide a keyword.<br>Usage: <code>/search &lt;keyword&gt;</code>",
+            "❌ Please provide a keyword.\nUsage: <code>/search &lt;keyword&gt;</code>",
             parse_mode=ParseMode.HTML
         )
         return
@@ -1211,12 +1215,11 @@ async def search_command(client, message):
         [InlineKeyboardButton("🌍 Include URLs", callback_data=f"format_{keyword}_full")]
     ])
     await message.reply(
-        f"🔎 Keyword: <code>{keyword}</code><br>Choose output format:",
+        f"🔎 Keyword: <code>{keyword}</code>\nChoose output format:",
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
-
-
+    
 # --- Handle format selection ---
 @app.on_callback_query(filters.regex("^format_"))
 async def perform_search(client, callback_query):
