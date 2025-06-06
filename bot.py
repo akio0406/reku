@@ -1144,14 +1144,16 @@ async def feedback_command(client, message):
         "Type /cancel to abort."
     )
 
-@app.on_message(
-    (filters.text | filters.photo | filters.video) &
-    AuthenticatedUser())
+@app.on_message((filters.text | filters.photo | filters.video))
 async def process_feedback(client, message):
     if not message.from_user:
         return
 
     user_id = message.from_user.id
+    state = user_state.get(user_id)
+    if not state or state.get("action") != "awaiting_feedback":
+        return
+
     feedback_content = message.text or message.caption or "[No message text]"
 
     try:
