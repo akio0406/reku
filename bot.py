@@ -1349,135 +1349,87 @@ async def copy_results_text(client, callback_query):
         parse_mode=ParseMode.HTML
     )
 
+from uuid import uuid4
 
-@app.on_message(filters.command("useractivity") & filters.user(admin_ids))
-async def user_activity_command(client, message):
-    args = message.text.split()
-    if len(args) < 2:
-        return await message.reply("❌ Usage: /useractivity <user_id> [limit]\nExample: /useractivity 123456789 10")
-    
+async def log_user_action(user_id: int, action: str):
+    await supabase.table("user_activity_log").insert({
+        "id": str(uuid4()),
+        "user_id": user_id,
+        "action": action
+    }).execute()
+
+@app.on_message(filters.command("activeusersactivity") & filters.user(admin_ids))
+async def active_users_activity(client, message):
     try:
-        target_id = int(args[1])
-        limit = int(args[2]) if len(args) > 2 else 20
-    except ValueError:
-        return await message.reply("❌ Invalid user ID or limit. Must be numbers.")
-    
-    activities = load_activity_log()
-    user_activities = activities.get(str(target_id), [])
-    
-    if not user_activities:
-        return await message.reply(f"ℹ️ No activities found for user ID: {target_id}")
-    
-    try:
-        user = await client.get_users(target_id)
-        user_info = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
-        user_info += f" (@{user.username})" if user.username else ""
-    except:
-        user_info = f"User ID: {target_id}"
-    
-    response = [f"📊 Activity log for {user_info} (Last {limit} activities):\n"]
-    
-    for activity in user_activities[-limit:]:
-        timestamp = datetime.datetime.fromisoformat(activity["timestamp"]).strftime("%Y-%m-%d %H:%M")
-        action = activity["action"]
-        details = activity.get("details", {})
-        
-        if action == "search":
-            response.append(
-                f"🔍 [{timestamp}] Searched: {details.get('keyword')}\n"
-                f"   - Format: {details.get('format')}"
-            )
-        elif action == "redeem":
-            response.append(
-                f"🔑 [{timestamp}] Redeemed key: {details.get('key')}\n"
-                f"   - Duration: {details.get('duration')}"
-            )
-        else:
-            response.append(f"⚙️ [{timestamp}] {action.capitalize()}")
-    
-    response_text = "\n\n".join(response)
-    
-    if len(response_text) > 4096:
-        parts = [response_text[i:i+4000] for i in range(0, len(response_text), 4000)]
-        for part in parts:
-            await message.reply(part)
-    else:
-        await message.reply(response_text)
+        # Optional: custom limit
+        args = message.text.split()
+        limit = int(args[1]) if len(args) > 1 else 5
 
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-@app.on_message(filters.command("activeusers") & filters.user(admin_ids))
-async def active_users_command(client, message):
-    try:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        print("🔍 /activeusers called — UTC now:", now)
-
-        # Supabase query
-        res = supabase.table("reku_keys").select("*") \
+        # Supabase: Get active keys
+        keys_res = supabase.table("reku_keys").select("*") \
             .not_("redeemed_by", "is", None) \
             .gt("expiry", now) \
             .execute()
+        keys = keys_res.data or []
 
-        print("📦 Supabase returned:", len(res.data) if res.data else 0)
-
-        if not res.data:
+        if not keys:
             return await message.reply("ℹ️ No active users found.")
 
-        keys = res.data
-        activities = load_activity_log()
-        active_users = {}
+        # Supabase: Get all activity logs
+        logs_res = supabase.table("user_activity_log").select("*") \
+            .order("timestamp", desc=True).execute()
+        all_logs = logs_res.data or []
 
-        for info in keys:
-            user_id = str(info["redeemed_by"])
-            active_users[user_id] = {
-                "key": info["key"],
-                "expiry": info["expiry"],
-                "last_activity": None
-            }
+        # Map user logs
+        logs_map = {}
+        for row in all_logs:
+            uid = str(row["user_id"])
+            logs_map.setdefault(uid, []).append(row)
 
-        for user_id, data in active_users.items():
-            user_activities = activities.get(user_id, [])
-            if user_activities:
-                last = user_activities[-1]
-                data["last_activity"] = {
-                    "action": last["action"],
-                    "timestamp": last["timestamp"]
-                }
+        response = ["👥 <b>Active Users with Activity</b>\n"]
 
-        response = ["👥 <b>Active Users and Last Activity</b>:\n"]
+        for row in keys:
+            user_id = str(row["redeemed_by"])
+            key = row["key"]
+            expiry = row["expiry"]
 
-        for user_id, data in active_users.items():
             try:
                 user = await client.get_users(int(user_id))
-                username = f"@{user.username}" if user.username else "No username"
                 name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
-            except Exception as e:
-                print(f"⚠️ Failed to fetch user {user_id}: {e}")
-                username = "Unknown"
+                username = f"@{user.username}" if user.username else "No username"
+            except:
                 name = "Unknown"
+                username = "Unknown"
 
             response.append(
                 f"👤 <b>{name}</b> ({username})\n"
                 f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
-                f"🔑 <b>Key:</b> <code>{data['key']}</code>\n"
-                f"⏳ <b>Expires:</b> {data['expiry']}"
+                f"🔑 <b>Key:</b> <code>{key}</code>\n"
+                f"⏳ <b>Expires:</b> {expiry}"
             )
 
-            if data["last_activity"]:
-                ts = datetime.datetime.fromisoformat(data["last_activity"]["timestamp"])
-                last_time = ts.strftime("%Y-%m-%d %H:%M")
-                response.append(f"⏱ <b>Last Activity:</b> {data['last_activity']['action']} at {last_time}")
+            user_logs = logs_map.get(user_id, [])
+            if user_logs:
+                last = user_logs[0]
+                last_time = datetime.datetime.fromisoformat(last["timestamp"]).strftime("%Y-%m-%d %H:%M")
+                response.append(f"⏱ <b>Last:</b> {last['action']} at {last_time}")
+                response.append("📝 <b>Recent Activity:</b>")
+                for entry in user_logs[:limit]:
+                    ts = datetime.datetime.fromisoformat(entry["timestamp"]).strftime("%m-%d %H:%M")
+                    response.append(f"• [{ts}] {entry['action']}")
             else:
                 response.append("⏱ <b>Last Activity:</b> None recorded")
+
             response.append("")
 
-        full_text = "\n".join(response)
-        chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
-
-        for chunk in chunks:
-            await message.reply(chunk, parse_mode=enums.ParseMode.HTML)
+        final = "\n".join(response)
+        chunks = [final[i:i+4000] for i in range(0, len(final), 4000)]
+        for part in chunks:
+            await message.reply(part, parse_mode=enums.ParseMode.HTML)
 
     except Exception as e:
-        print("❌ Exception in /activeusers:", str(e))
         await message.reply(f"❌ Error: {str(e)}")
 
 
