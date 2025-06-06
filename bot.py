@@ -42,15 +42,15 @@ class AuthenticatedUser(Filter):
 
 # --- Supabase Key Management (Final Version) ---
 async def get_all_keys():
-    res = await supabase.table("reku_keys").select("*").execute()
+    res = supabase.table("reku_keys").select("*").execute()
     return res.data if res.data else []
 
 async def get_key_entry(key):
-    res = await supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
+    res = supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
     return res.data[0] if res.data else None
 
 async def insert_key_entry(key, expiry, owner_id, duration):
-    await supabase.table("reku_keys").insert({
+    supabase.table("reku_keys").insert({
         "key": key,
         "expiry": expiry,
         "owner_id": owner_id,
@@ -59,13 +59,13 @@ async def insert_key_entry(key, expiry, owner_id, duration):
     }).execute()
 
 async def update_key_redeemed_by(key, user_id):
-    await supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
+    supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
 
 async def delete_key_entry(key):
-    await supabase.table("reku_keys").delete().eq("key", key).execute()
+    supabase.table("reku_keys").delete().eq("key", key).execute()
 
 async def get_user_key_info(user_id):
-    keys = await get_all_keys()  # ✅ Proper await
+    keys = get_all_keys()  # ✅ Proper await
     for info in keys:
         if str(info.get("redeemed_by")) == str(user_id):
             return info["key"], info
@@ -74,7 +74,7 @@ async def get_user_key_info(user_id):
 
 async def check_user_access(user_id: int):
     try:
-        keys = await get_all_keys()
+        keys = get_all_keys()
         for key in keys:
             if str(key.get("redeemed_by")) == str(user_id):
                 expiry = datetime.datetime.fromisoformat(key["expiry"])
@@ -180,7 +180,7 @@ async def redeem_key(client, message):
         return await message.reply("❌ Usage: /redeem <key>\nExample: /redeem ISAGI-ABC123XYZ")
     
     key = args[1].strip().upper()
-    key_info = await get_key_entry(key)
+    key_info = get_key_entry(key)
 
     if not key_info:
         return await message.reply("❌ Invalid key! Please check your key and try again.")
@@ -196,7 +196,7 @@ async def redeem_key(client, message):
         return await message.reply("⚠️ Key has invalid expiry date")
     
     # Check if user already has a redeemed key
-    keys = await get_all_keys()
+    keys = get_all_keys()
     for existing in keys:
         if existing["redeemed_by"] == message.from_user.id:
             return await message.reply(
@@ -206,7 +206,7 @@ async def redeem_key(client, message):
                 "You can only have one active subscription at a time."
             )
 
-    await update_key_redeemed_by(key, message.from_user.id)
+    update_key_redeemed_by(key, message.from_user.id)
     human_duration = format_duration(key_info.get("duration", "Unknown"))
     
     await message.reply(
@@ -389,7 +389,7 @@ async def redeem_help(client, callback_query):
 
 @app.on_message(filters.command("users") & filters.user(admin_ids))
 async def list_users(client, message):
-    keys = await get_all_keys()  # ✅ Proper usage
+    keys = get_all_keys()  # ✅ Proper usage
     users = {}
     
     for info in keys:
@@ -459,7 +459,7 @@ async def generate_key(client, message):
     expiry = (datetime.datetime.now() + delta).isoformat()
     key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
 
-    await insert_key_entry(key=key, expiry=expiry, owner_id=None, duration=duration_str)
+    insert_key_entry(key=key, expiry=expiry, owner_id=None, duration=duration_str)
     
     human_duration = format_duration(duration_str)
     await message.reply(
@@ -513,7 +513,7 @@ async def mass_generate_keys(client, message):
     generated_keys = []
     for _ in range(quantity):
         key = prefix + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=8))
-        await insert_key_entry(
+        insert_key_entry(
             key=key,
             expiry=expiry,
             owner_id=None,
@@ -565,7 +565,7 @@ async def confirm_masskey(client, callback_query):
 
     delta = parse_duration(duration_str)
     expiry = (datetime.datetime.now() + delta).isoformat()
-    keys = await get_all_keys()  
+    keys = get_all_keys()  
     
     generated_keys = []
     for _ in range(quantity):
@@ -619,11 +619,11 @@ async def remove_license(client, message):
 
     key = args[1].strip()
     try:
-        key_data = await get_key_entry(key)
+        key_data = get_key_entry(key)
         if not key_data:
             return await message.reply("🚫 Key not found.")
 
-        await delete_key_entry(key)
+        delete_key_entry(key)
         await message.reply(f"✅ Key `{key}` has been removed.", parse_mode=enums.ParseMode.MARKDOWN)
 
     except Exception as e:
@@ -635,7 +635,7 @@ async def broadcast_message(client, message):
         return await message.reply("❌ Usage: /broadcast <message>")
     
     broadcast_text = message.text.split(maxsplit=1)[1]
-    keys = await get_all_keys()
+    keys = get_all_keys()
     
     # Extract unique user IDs from redeemed keys
     users = {str(info["redeemed_by"]) for info in keys if info.get("redeemed_by")}
@@ -842,7 +842,7 @@ async def process_key_duration(client, message):
     expiry = (datetime.datetime.now() + delta).isoformat()
     key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
 
-    await insert_key_entry(
+    insert_key_entry(
         key=key,
         expiry=expiry,
         owner_id=payment["user_id"],
@@ -1022,7 +1022,7 @@ async def delete_all_keys(client, message):
 @app.on_callback_query(filters.regex("^confirm_delete_all_keys$"))
 async def confirm_delete_all_keys(client, callback_query):
     try:
-        await supabase.table("reku_keys").delete().neq("key", "").execute()
+        supabase.table("reku_keys").delete().neq("key", "").execute()
         await callback_query.message.edit_text("✅ All keys have been permanently deleted.")
     except Exception as e:
         await callback_query.message.edit_text(f"❌ Error deleting keys: {str(e)}")
@@ -1073,7 +1073,7 @@ async def dice_game(client, message):
 
     try:
         # Query Supabase for up to 50 matching lines
-        res = await supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(50).execute()
+        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(50).execute()
         lines = [entry["line"] for entry in res.data if keyword.lower() in entry["line"].lower()]
 
         if not lines:
