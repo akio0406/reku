@@ -1409,12 +1409,15 @@ async def user_activity_command(client, message):
 async def active_users_command(client, message):
     try:
         now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
+        print("🔍 /activeusers called — UTC now:", now)
 
-        # Fetch all valid, redeemed keys that haven't expired
+        # Supabase query
         res = supabase.table("reku_keys").select("*") \
             .not_("redeemed_by", "is", None) \
             .gt("expiry", now) \
             .execute()
+
+        print("📦 Supabase returned:", len(res.data) if res.data else 0)
 
         if not res.data:
             return await message.reply("ℹ️ No active users found.")
@@ -1440,7 +1443,6 @@ async def active_users_command(client, message):
                     "timestamp": last["timestamp"]
                 }
 
-        # Format response
         response = ["👥 <b>Active Users and Last Activity</b>:\n"]
 
         for user_id, data in active_users.items():
@@ -1448,7 +1450,8 @@ async def active_users_command(client, message):
                 user = await client.get_users(int(user_id))
                 username = f"@{user.username}" if user.username else "No username"
                 name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
-            except:
+            except Exception as e:
+                print(f"⚠️ Failed to fetch user {user_id}: {e}")
                 username = "Unknown"
                 name = "Unknown"
 
@@ -1467,14 +1470,16 @@ async def active_users_command(client, message):
                 response.append("⏱ <b>Last Activity:</b> None recorded")
             response.append("")
 
-        # Send in chunks if too long
         full_text = "\n".join(response)
         chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
+
         for chunk in chunks:
             await message.reply(chunk, parse_mode=enums.ParseMode.HTML)
 
     except Exception as e:
+        print("❌ Exception in /activeusers:", str(e))
         await message.reply(f"❌ Error: {str(e)}")
+
 
 from collections import defaultdict
 
