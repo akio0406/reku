@@ -1199,27 +1199,36 @@ async def restricted(_, __, message: Message):
         return False
 
 # --- /search <keyword> command ---
-@app.on_message(filters.command("search") & filters.create(restricted))
+@app.on_message(filters.command("search"))
 async def search_command(client, message):
+    print(f"[SEARCH] From: {message.from_user.id}, Message: {message.text}")
+
+    if not await restricted(client, None, message):
+        print(f"[SEARCH] Access denied for {message.from_user.id}")
+        return await message.reply("⛔ You don't have access to this command.")
+
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.reply(
+        print(f"[SEARCH] No keyword provided.")
+        return await message.reply(
             "❌ Please provide a keyword.\nUsage: <code>/search &lt;keyword&gt;</code>",
             parse_mode=ParseMode.HTML
         )
-        return
 
     keyword = args[1].strip()
+    print(f"[SEARCH] Keyword: {keyword}")
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ User:Pass Only", callback_data=f"format_{keyword}_userpass")],
         [InlineKeyboardButton("🌍 Include URLs", callback_data=f"format_{keyword}_full")]
     ])
+
     await message.reply(
         f"🔎 Keyword: <code>{keyword}</code>\nChoose output format:",
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
     )
-    
+
 # --- Handle format selection ---
 @app.on_callback_query(filters.regex("^format_"))
 async def perform_search(client, callback_query):
