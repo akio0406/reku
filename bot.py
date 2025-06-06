@@ -36,10 +36,6 @@ class AuthenticatedUser(Filter):
 
 
 # --- Supabase-based key functions ---
-def get_all_keys():
-    res = supabase.table("reku_keys").select("*").execute()
-    return res.data if res.data else []
-
 async def get_key_entry(key):
     res = supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
     return res.data[0] if res.data else None
@@ -56,8 +52,8 @@ async def delete_key_entry(key):
 
 
 # --- Supabase Key Management (Final Version) ---
-def get_all_keys():
-    res = supabase.table("reku_keys").select("*").execute()
+async def get_all_keys():
+    res = await supabase.table("reku_keys").select("*").execute()
     return res.data if res.data else []
 
 async def get_key_entry(key):
@@ -80,7 +76,7 @@ async def delete_key_entry(key):
     supabase.table("reku_keys").delete().eq("key", key).execute()
 
 async def get_user_key_info(user_id):
-    keys = get_all_keys()
+    keys = await get_all_keys()
     for info in keys:
         if str(info.get("redeemed_by")) == str(user_id):
             return info["key"], info
@@ -88,7 +84,7 @@ async def get_user_key_info(user_id):
 
 
 async def check_user_access(user_id: int):
-    keys = get_all_keys()
+    keys = await get_all_keys()
     for key in keys:
         if str(key.get("redeemed_by")) == str(user_id):
             try:
@@ -189,7 +185,7 @@ def format_duration(duration_str):
         return duration_str
 
 async def check_user_access(user_id: int):
-    keys = get_all_keys()
+    keys = await get_all_keys()
     for key in keys:
         if str(key.get("redeemed_by")) == str(user_id):
             try:
@@ -224,7 +220,7 @@ async def redeem_key(client, message):
         return await message.reply("⚠️ Key has invalid expiry date")
     
     # Check if user already has a redeemed key
-    keys = get_all_keys()
+    keys = await get_all_keys()
     for existing in keys:
         if existing["redeemed_by"] == message.from_user.id:
             return await message.reply(
@@ -417,7 +413,7 @@ async def redeem_help(client, callback_query):
 
 @app.on_message(filters.command("users") & filters.user(admin_ids))
 async def list_users(client, message):
-    keys = get_all_keys()
+    keys = await get_all_keys()
     users = {}
     
     for info in keys:
@@ -593,7 +589,7 @@ async def confirm_masskey(client, callback_query):
 
     delta = parse_duration(duration_str)
     expiry = (datetime.datetime.now() + delta).isoformat()
-    keys = get_all_keys()
+    keys = await get_all_keys()
     
     generated_keys = []
     for _ in range(quantity):
@@ -663,8 +659,8 @@ async def broadcast_message(client, message):
         return await message.reply("❌ Usage: /broadcast <message>")
     
     broadcast_text = message.text.split(maxsplit=1)[1]
-    keys = get_all_keys()
-
+    keys = await get_all_keys()
+    
     # Extract unique user IDs from redeemed keys
     users = {str(info["redeemed_by"]) for info in keys if info.get("redeemed_by")}
     
