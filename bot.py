@@ -1350,25 +1350,31 @@ async def copy_results_text(client, callback_query):
     )
 
 from uuid import uuid4
+import datetime
+from pyrogram import enums
 
+# --- Log user action to Supabase ---
 async def log_user_action(user_id: int, action: str):
-    await supabase.table("user_activity_log").insert({
-        "id": str(uuid4()),
-        "user_id": user_id,
-        "action": action
-    }).execute()
+    try:
+        await supabase.table("user_activity_log").insert({
+            "id": str(uuid4()),
+            "user_id": user_id,
+            "action": action
+        }).execute()
+    except Exception as e:
+        print(f"❌ Failed to log user action: {e}")
 
+# --- /activeusersactivity command ---
 @app.on_message(filters.command("activeusersactivity") & filters.user(admin_ids))
 async def active_users_activity(client, message):
     try:
-        # Optional: custom limit
         args = message.text.split()
         limit = int(args[1]) if len(args) > 1 else 5
 
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc)
 
-        # Supabase: Get active keys
-        keys_res = supabase.table("reku_keys").select("*") \
+        # --- Fetch active users from reku_keys ---
+        keys_res = await supabase.table("reku_keys").select("*") \
             .not_("redeemed_by", "is", None) \
             .gt("expiry", now) \
             .execute()
@@ -1377,12 +1383,12 @@ async def active_users_activity(client, message):
         if not keys:
             return await message.reply("ℹ️ No active users found.")
 
-        # Supabase: Get all activity logs
-        logs_res = supabase.table("user_activity_log").select("*") \
+        # --- Fetch all logs ---
+        logs_res = await supabase.table("user_activity_log").select("*") \
             .order("timestamp", desc=True).execute()
         all_logs = logs_res.data or []
 
-        # Map user logs
+        # --- Build logs map by user_id ---
         logs_map = {}
         for row in all_logs:
             uid = str(row["user_id"])
@@ -1399,7 +1405,8 @@ async def active_users_activity(client, message):
                 user = await client.get_users(int(user_id))
                 name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
                 username = f"@{user.username}" if user.username else "No username"
-            except:
+            except Exception as e:
+                print(f"⚠️ Could not fetch user {user_id}: {e}")
                 name = "Unknown"
                 username = "Unknown"
 
@@ -1413,11 +1420,18 @@ async def active_users_activity(client, message):
             user_logs = logs_map.get(user_id, [])
             if user_logs:
                 last = user_logs[0]
-                last_time = datetime.datetime.fromisoformat(last["timestamp"]).strftime("%Y-%m-%d %H:%M")
+                try:
+                    last_time = datetime.datetime.fromisoformat(last["timestamp"]).strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    last_time = last["timestamp"]
+
                 response.append(f"⏱ <b>Last:</b> {last['action']} at {last_time}")
                 response.append("📝 <b>Recent Activity:</b>")
                 for entry in user_logs[:limit]:
-                    ts = datetime.datetime.fromisoformat(entry["timestamp"]).strftime("%m-%d %H:%M")
+                    try:
+                        ts = datetime.datetime.fromisoformat(entry["timestamp"]).strftime("%m-%d %H:%M")
+                    except Exception:
+                        ts = entry["timestamp"]
                     response.append(f"• [{ts}] {entry['action']}")
             else:
                 response.append("⏱ <b>Last Activity:</b> None recorded")
@@ -1425,11 +1439,15 @@ async def active_users_activity(client, message):
             response.append("")
 
         final = "\n".join(response)
-        chunks = [final[i:i+4000] for i in range(0, len(final), 4000)]
-        for part in chunks:
-            await message.reply(part, parse_mode=enums.ParseMode.HTML)
+        if len(final) == 0:
+            return await message.reply("ℹ️ No activity found.")
+
+        # Send response in chunks (Telegram limit: 4096 chars)
+        for i in range(0, len(final), 4000):
+            await message.reply(final[i:i+4000], parse_mode=enums.ParseMode.HTML)
 
     except Exception as e:
+        print("❌ Error in /activeusersactivity:", str(e))
         await message.reply(f"❌ Error: {str(e)}")
 
 
