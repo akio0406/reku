@@ -1718,7 +1718,7 @@ app.run()
 
 
 # --- Merge command handler ---
-@app.on_message(filters.command("merge") & AuthenticatedUser())
+@app.on_message(filters.command("merge"))
 async def start_merge(client, message):
     user_id = message.from_user.id
     user_state[user_id] = {
@@ -1727,7 +1727,8 @@ async def start_merge(client, message):
         "file_names": [],
         "timestamp": time.time()
     }
-    await message.reply("📎 Send me the `.txt` files you want to merge.\nWhen you're done, type /done.")
+    await message.reply("📎 Send the `.txt` files to merge.\nThen type /done.")
+
 
 # --- Handle each .txt upload during merge session ---
 @app.on_message(filters.document & AuthenticatedUser())
