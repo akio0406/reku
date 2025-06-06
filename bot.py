@@ -1407,73 +1407,71 @@ async def user_activity_command(client, message):
 
 @app.on_message(filters.command("activeusers") & filters.user(admin_ids))
 async def active_users_command(client, message):
-    activities = load_activity_log()
-    keys = get_all_keys()  # expects a list of dicts
+    try:
+        # Fetch all keys that are redeemed and not expired
+        now = datetime.datetime.utcnow().isoformat()
+        res = supabase.table("reku_keys").select("*").not_(
+            "redeemed_by", "is", None
+        ).gt("expiry", now).execute()
 
-    active_users = {}
+        if not res.data:
+            return await message.reply("ℹ️ No active users found.")
 
-    for info in keys:
-        if info.get("redeemed_by") and "expiry" in info:
+        keys = res.data
+        activities = load_activity_log()
+        active_users = {}
+
+        for info in keys:
             user_id = str(info["redeemed_by"])
-            try:
-                expiry = datetime.datetime.fromisoformat(info["expiry"])
-                if expiry > datetime.datetime.now():
-                    active_users[user_id] = {
-                        "key": info.get("key", "N/A"),
-                        "expiry": info["expiry"],
-                        "last_activity": None
-                    }
-            except ValueError:
-                continue
-
-    for user_id, data in active_users.items():
-        user_activities = activities.get(str(user_id), [])
-        if user_activities:
-            last_activity = user_activities[-1]
-            data["last_activity"] = {
-                "action": last_activity["action"],
-                "timestamp": last_activity["timestamp"]
+            active_users[user_id] = {
+                "key": info["key"],
+                "expiry": info["expiry"],
+                "last_activity": None
             }
 
-    if not active_users:
-        return await message.reply("ℹ️ No active users found.")
-    
-    response = ["👥 Active Users and Their Last Activity:\n"]
-    
-    for user_id, data in active_users.items():
-        try:
-            user = await client.get_users(int(user_id))
-            username = f"@{user.username}" if user.username else "No username"
-            name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
-        except:
-            username = "Unknown"
-            name = "Unknown"
-        
-        response.append(
-            f"👤 {name} ({username})\n"
-            f"🆔 ID: {user_id}\n"
-            f"🔑 Key: {data['key']}\n"
-            f"⏳ Expires: {data['expiry']}"
-        )
-        
-        if data["last_activity"]:
-            last_action = data["last_activity"]["action"]
-            last_time = datetime.datetime.fromisoformat(data["last_activity"]["timestamp"]).strftime("%Y-%m-%d %H:%M")
-            response.append(f"   ⏱ Last activity: {last_action} at {last_time}")
-        else:
-            response.append("   ⏱ No recorded activity")
-        
-        response.append("")     
+        for user_id, data in active_users.items():
+            user_activities = activities.get(user_id, [])
+            if user_activities:
+                last = user_activities[-1]
+                data["last_activity"] = {
+                    "action": last["action"],
+                    "timestamp": last["timestamp"]
+                }
 
-    response_text = "\n".join(response)
-    
-    if len(response_text) > 4096:
-        parts = [response_text[i:i+4000] for i in range(0, len(response_text), 4000)]
-        for part in parts:
-            await message.reply(part)
-    else:
-        await message.reply(response_text)
+        # Format response
+        response = ["👥 <b>Active Users and Last Activity</b>:\n"]
 
+        for user_id, data in active_users.items():
+            try:
+                user = await client.get_users(int(user_id))
+                username = f"@{user.username}" if user.username else "No username"
+                name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
+            except:
+                username = "Unknown"
+                name = "Unknown"
+
+            response.append(
+                f"👤 <b>{name}</b> ({username})\n"
+                f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+                f"🔑 <b>Key:</b> <code>{data['key']}</code>\n"
+                f"⏳ <b>Expires:</b> {data['expiry']}"
+            )
+
+            if data["last_activity"]:
+                ts = datetime.datetime.fromisoformat(data["last_activity"]["timestamp"])
+                last_time = ts.strftime("%Y-%m-%d %H:%M")
+                response.append(f"⏱ <b>Last Activity:</b> {data['last_activity']['action']} at {last_time}")
+            else:
+                response.append("⏱ <b>Last Activity:</b> None recorded")
+            response.append("")
+
+        full_text = "\n".join(response)
+        chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
+        for chunk in chunks:
+            await message.reply(chunk, parse_mode=enums.ParseMode.HTML)
+
+    except Exception as e:
+        await message.reply(f"❌ Error: {str(e)}")
 
 from collections import defaultdict
 
