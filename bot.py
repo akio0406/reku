@@ -1172,32 +1172,7 @@ async def process_feedback(client, message):
     )
 
     try:
-        if message.photo:
-            await client.send_photo(
-                chat_id=admin_ids,
-                photo=message.photo.file_id,
-                caption=feedback_msg,
-                parse_mode=enums.ParseMode.MARKDOWN
-            )
-        elif message.video:
-            await client.send_video(
-                chat_id=admin_ids,
-                video=message.video.file_id,
-                caption=feedback_msg,
-                parse_mode=enums.ParseMode.MARKDOWN
-            )
-        else:
-            await client.send_message(
-                chat_id=admin_ids,
-                text=feedback_msg,
-                parse_mode=enums.ParseMode.MARKDOWN
-            )
-
-        await message.reply("✅ Your feedback has been sent to the admin. Thank you!")
-    except Exception as e:
-        await message.reply(f"❌ Failed to send feedback: {str(e)}")
-    finally:
-        user_state.pop(user_id, None)
+       
 
 async def restricted(_, __, message: Message):
     user_id = message.from_user.id
