@@ -426,7 +426,7 @@ async def list_users(client, message):
             user_id = info["redeemed_by"]
             try:
                 expiry = datetime.datetime.fromisoformat(info["expiry"])
-                remaining = expiry - datetime.datetime.now()
+                remaining = expiry - datetime.datetime.now(datetime.timezone.utc)
                 
                 if remaining.days > 0:
                     remaining_str = f"{remaining.days}d {remaining.seconds//3600}h"
