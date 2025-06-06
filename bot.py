@@ -1408,11 +1408,13 @@ async def user_activity_command(client, message):
 @app.on_message(filters.command("activeusers") & filters.user(admin_ids))
 async def active_users_command(client, message):
     try:
-        # Fetch all keys that are redeemed and not expired
-        now = datetime.datetime.utcnow().isoformat()
-        res = supabase.table("reku_keys").select("*").not_(
-            "redeemed_by", "is", None
-        ).gt("expiry", now).execute()
+        now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
+
+        # Fetch all valid, redeemed keys that haven't expired
+        res = supabase.table("reku_keys").select("*") \
+            .not_("redeemed_by", "is", None) \
+            .gt("expiry", now) \
+            .execute()
 
         if not res.data:
             return await message.reply("ℹ️ No active users found.")
@@ -1465,6 +1467,7 @@ async def active_users_command(client, message):
                 response.append("⏱ <b>Last Activity:</b> None recorded")
             response.append("")
 
+        # Send in chunks if too long
         full_text = "\n".join(response)
         chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
         for chunk in chunks:
