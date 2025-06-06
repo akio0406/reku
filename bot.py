@@ -193,7 +193,7 @@ async def redeem_key(client, message):
         if expiry < datetime.datetime.now(datetime.timezone.utc):
             return await message.reply("⌛ This key has expired!")
     except ValueError:
-        return await message.reply(⚠️ Key has invalid expiry date")
+        return await message.reply("⚠️ Key has invalid expiry date")
     
     # Check if user already has a redeemed key
     keys = await get_all_keys()
@@ -1513,3 +1513,4 @@ async def handle_uploaded_document(client, message: Message):
                 os.remove("results_removedurl.txt")
 
 app.run()
+
