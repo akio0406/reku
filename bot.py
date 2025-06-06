@@ -274,7 +274,7 @@ async def user_info(client, message):
 
     try:
         expiry = datetime.datetime.fromisoformat(info["expiry"])
-        remaining = expiry - datetime.datetime.now()
+        remaining = expiry - datetime.datetime.now(datetime.timezone.utc)
 
         if remaining.days > 0:
             remaining_str = f"{remaining.days} days"
