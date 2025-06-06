@@ -1718,6 +1718,10 @@ async def check_lines(_, message: Message):
 @app.on_message(filters.command("merge"))
 async def start_merge(client, message):
     user_id = message.from_user.id
+    if user_id not in admin_ids:
+        await message.reply("❌ You are not authorized to use this command.")
+        return
+
     user_state[user_id] = {
         "action": "awaiting_merge_files",
         "files": [],
@@ -1726,13 +1730,14 @@ async def start_merge(client, message):
     }
     await message.reply("📎 Send the `.txt` files to merge.\nThen type /done.")
 
-
 # --- Handle each .txt upload during merge session ---
 @app.on_message(filters.document)
 async def handle_merge_file(client, message):
     user_id = message.from_user.id
-    state = user_state.get(user_id)
+    if user_id not in admin_ids:
+        return  # silently ignore non-admins
 
+    state = user_state.get(user_id)
     if not state or state.get("action") != "awaiting_merge_files":
         return
 
@@ -1748,13 +1753,15 @@ async def handle_merge_file(client, message):
     state["file_names"].append(doc.file_name)
     await message.reply(f"✅ Added file: <code>{doc.file_name}</code>", parse_mode=ParseMode.HTML)
 
-
 # --- Finalize merge on /done ---
 @app.on_message(filters.command("done"))
 async def finalize_merge(client, message):
     user_id = message.from_user.id
-    state = user_state.get(user_id)
+    if user_id not in admin_ids:
+        await message.reply("❌ You are not authorized to use this command.")
+        return
 
+    state = user_state.get(user_id)
     if not state or not state.get("files"):
         await message.reply("❌ No files found to merge. Start with /merge.")
         return
