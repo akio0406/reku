@@ -1226,17 +1226,22 @@ async def perform_search(client, callback_query):
     _, keyword, fmt = callback_query.data.split("_", 2)
     include_urls = fmt == "full"
     await callback_query.answer("🔍 Searching...", show_alert=False)
+
     msg = await callback_query.message.edit_text(
         f"🔍 Searching <code>{keyword}</code>...",
         parse_mode=ParseMode.HTML
     )
 
     try:
-        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
+        # ✅ Run Supabase query safely in async context
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(None, lambda: supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute())
         entries = [row["line"] for row in res.data] if res.data else []
+
     except Exception as e:
         await msg.edit_text(f"❌ Supabase error: {str(e)}")
         return
+
 
     if not entries:
         await msg.edit_text("❌ No matches found.")
