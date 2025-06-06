@@ -1728,7 +1728,7 @@ async def start_merge(client, message):
 
 
 # --- Handle each .txt upload during merge session ---
-@app.on_message(filters.document & AuthenticatedUser())
+@app.on_message(filters.document)
 async def handle_merge_file(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -1748,8 +1748,9 @@ async def handle_merge_file(client, message):
     state["file_names"].append(doc.file_name)
     await message.reply(f"✅ Added file: <code>{doc.file_name}</code>", parse_mode=ParseMode.HTML)
 
+
 # --- Finalize merge on /done ---
-@app.on_message(filters.command("done") & AuthenticatedUser())
+@app.on_message(filters.command("done"))
 async def finalize_merge(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
