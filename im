@@ -1,3 +1,4 @@
+# --- Standard Library Imports ---
 import os
 import re
 import json
@@ -5,14 +6,19 @@ import time
 import random
 import asyncio
 import datetime
-import pytz
+from collections import defaultdict, Counter
+from uuid import uuid4
 import base64
+
+# --- Third-Party Library Imports ---
+import pytz
 import requests
-from collections import Counter
+from pyrogram import Client, filters, enums
+from pyrogram.enums import ParseMode
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.filters import Filter
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-from pyrogram import Client, filters, enums
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client
 
 # --- Environment Variables ---
@@ -27,13 +33,10 @@ admin_ids = [int(id.strip()) for id in admin_ids if id.strip()]
 # --- Supabase Client ---
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- App + Globals ---
-from pyrogram.filters import Filter
-
+# --- Custom Filters ---
 class AuthenticatedUser(Filter):
     async def __call__(self, client, message):
         return await check_user_access(message.from_user.id)
-
 
 # --- Supabase-based key functions ---
 def get_all_keys():
@@ -1219,8 +1222,6 @@ async def restricted(_, __, message: Message):
     search_cooldowns[user_id] = now
     return True
 
-from pyrogram.enums import ParseMode
-
 # --- /search <keyword> handler ---
 @app.on_message(filters.command("search") & filters.create(restricted))
 async def search_command(client, message):
@@ -1342,10 +1343,6 @@ async def copy_results_text(client, callback_query):
         parse_mode=ParseMode.HTML
     )
 
-from uuid import uuid4
-import datetime
-from pyrogram import enums
-
 # --- Log user action to Supabase ---
 async def log_user_action(user_id: int, action: str):
     try:
@@ -1443,8 +1440,6 @@ async def active_users_activity(client, message):
         print("❌ Error in /activeusersactivity:", str(e))
         await message.reply(f"❌ Error: {str(e)}")
 
-
-from collections import defaultdict
 
 # Match the search UI buttons
 KEYWORDS = [
