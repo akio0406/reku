@@ -1393,99 +1393,37 @@ async def restricted(_, __, message: Message):
 
     if await check_user_access(user_id):
         return True
-
-    if user_id == admin_ids:
+    if user_id in admin_ids:
         return True
 
     now = time.time()
-    if user_id in search_cooldowns:
-        last_search = search_cooldowns[user_id]
-        if now - last_search < 60:
-            return False
+    last_search = search_cooldowns.get(user_id, 0)
+    if now - last_search < 60:
+        return False
 
     search_cooldowns[user_id] = now
     return True
 
-
-# --- SEARCH COMMAND ---
+# --- /search <keyword> handler ---
 @app.on_message(filters.command("search") & filters.create(restricted))
-async def ask_keyword(client, message):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎲 Roblox", callback_data="keyword_roblox")],
-        [InlineKeyboardButton("🔥 Mobile Legends", callback_data="keyword_mobilelegends")],
-        [InlineKeyboardButton("💳 Codashop", callback_data="keyword_codashop")],
-        [InlineKeyboardButton("🛡 Garena", callback_data="expand_garena")],
-        [InlineKeyboardButton("🌐 Social Media", callback_data="expand_socmeds")],
-        [InlineKeyboardButton("✉️ Email Providers", callback_data="expand_emails")],
-        [InlineKeyboardButton("🎮 Gaming", callback_data="expand_gaming")]
-    ])
-    await message.reply("🔎 Choose a category:", reply_markup=keyboard)
+async def search_command(client, message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Please provide a keyword.\nUsage: `/search <keyword>`", parse_mode="Markdown")
+        return
 
-# --- CATEGORY EXPANSIONS ---
-@app.on_callback_query(filters.regex("^expand_garena$"))
-async def expand_garena_options(client, callback_query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎮 Garena.com", callback_data="keyword_garena.com")],
-        [InlineKeyboardButton("🔐 100082", callback_data="keyword_100082")],
-        [InlineKeyboardButton("🔐 100055", callback_data="keyword_100055")],
-        [InlineKeyboardButton("🛡 Authgop", callback_data="keyword_authgop.garena.com")],
-        [InlineKeyboardButton("🔐 Gaslite", callback_data="keyword_gaslite")],
-        [InlineKeyboardButton("🔙 Back", callback_data="back_to_main")]
-    ])
-    await callback_query.message.edit_text("🛡 Garena Sub-keywords:", reply_markup=keyboard)
-
-@app.on_callback_query(filters.regex("^expand_socmeds$"))
-async def expand_socmeds(client, callback_query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📘 Facebook", callback_data="keyword_facebook.com")],
-        [InlineKeyboardButton("📸 Instagram", callback_data="keyword_instagram.com")],
-        [InlineKeyboardButton("📱 WhatsApp", callback_data="keyword_whatsapp.com")],
-        [InlineKeyboardButton("🐦 Twitter", callback_data="keyword_twitter.com")],
-        [InlineKeyboardButton("💬 Discord", callback_data="keyword_discord.com")],
-        [InlineKeyboardButton("🔙 Back", callback_data="back_to_main")]
-    ])
-    await callback_query.message.edit_text("🌐 Social Media Options:", reply_markup=keyboard)
-
-@app.on_callback_query(filters.regex("^expand_emails$"))
-async def expand_emails(client, callback_query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📧 Gmail", callback_data="keyword_google.com")],
-        [InlineKeyboardButton("📧 Yahoo", callback_data="keyword_yahoo.com")],
-        [InlineKeyboardButton("📧 Outlook", callback_data="keyword_outlook.com")],
-        [InlineKeyboardButton("🔙 Back", callback_data="back_to_main")]
-    ])
-    await callback_query.message.edit_text("✉️ Email Provider Options:", reply_markup=keyboard)
-
-@app.on_callback_query(filters.regex("^expand_gaming$"))
-async def expand_gaming(client, callback_query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎮 Riot", callback_data="keyword_riotgames.com")],
-        [InlineKeyboardButton("🎮 Battle.net", callback_data="keyword_battle.net")],
-        [InlineKeyboardButton("🎮 Minecraft", callback_data="keyword_minecraft.net")],
-        [InlineKeyboardButton("🎮 Supercell", callback_data="keyword_supercell.com")],
-        [InlineKeyboardButton("🎮 Wargaming", callback_data="keyword_wargaming.net")],
-        [InlineKeyboardButton("🔙 Back", callback_data="back_to_main")]
-    ])
-    await callback_query.message.edit_text("🎮 Gaming Options:", reply_markup=keyboard)
-
-@app.on_callback_query(filters.regex("^back_to_main$"))
-async def back_to_main_menu(client, callback_query):
-    await ask_keyword(client, callback_query.message)
-
-# --- KEYWORD SELECTED ---
-@app.on_callback_query(filters.regex("^keyword_"))
-async def ask_format(client, callback_query):
-    keyword = callback_query.data.split("_", 1)[1]
+    keyword = args[1].strip()
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ User:Pass Only", callback_data=f"format_{keyword}_userpass")],
         [InlineKeyboardButton("🌍 Include URLs", callback_data=f"format_{keyword}_full")]
     ])
-    await callback_query.message.edit_text(
+    await message.reply(
         f"🔎 Keyword: `{keyword}`\nChoose output format:",
-        reply_markup=keyboard
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
 
-# --- SUPABASE SEARCH ---
+# --- Handle format selection ---
 @app.on_callback_query(filters.regex("^format_"))
 async def perform_search(client, callback_query):
     _, keyword, fmt = callback_query.data.split("_", 2)
@@ -1530,7 +1468,7 @@ async def perform_search(client, callback_query):
         await msg.edit_text("❌ No new valid results (limit reached per line).")
         return
 
-    selected = random.sample(filtered, min(len(filtered), random.randint(100, 120)))
+    selected = random.sample(filtered, min(len(filtered), random.randint(100, 150)))
     with open(result_path, "w", encoding="utf-8") as f:
         for line in selected:
             f.write(f"{line}\n")
@@ -1551,7 +1489,7 @@ async def perform_search(client, callback_query):
         reply_markup=keyboard
     )
 
-# --- DOWNLOAD RESULTS ---
+# --- Send .txt file ---
 @app.on_callback_query(filters.regex("^download_results_"))
 async def download_results_file(client, callback_query):
     filename = callback_query.data.split("_", 2)[2]
@@ -1565,7 +1503,7 @@ async def download_results_file(client, callback_query):
         caption="📄 Here are your results."
     )
 
-# --- COPY RESULTS TEXT ---
+# --- Send text preview ---
 @app.on_callback_query(filters.regex("^copy_code_"))
 async def copy_results_text(client, callback_query):
     parts = callback_query.data.split("_", 3)
