@@ -1,3 +1,4 @@
+
 import os
 import re
 import json
@@ -42,11 +43,11 @@ class AuthenticatedUser(Filter):
 
 # --- Supabase Key Management (Final Version) ---
 def get_all_keys():
-    res = supabase.table("reku_keys").select("*").execute()
+    res = await supabase.table("reku_keys").select("*").execute()
     return res.data if res.data else []
 
 async def get_key_entry(key):
-    res = supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
+    res = await supabase.table("reku_keys").select("*").eq("key", key).limit(1).execute()
     return res.data[0] if res.data else None
 
 async def insert_key_entry(key, expiry, owner_id, duration):
@@ -59,10 +60,10 @@ async def insert_key_entry(key, expiry, owner_id, duration):
     }).execute()
 
 async def update_key_redeemed_by(key, user_id):
-    supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
+    await supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
 
 async def delete_key_entry(key):
-    supabase.table("reku_keys").delete().eq("key", key).execute()
+    await supabase.table("reku_keys").delete().eq("key", key).execute()
 
 async def get_user_key_info(user_id):
     keys = get_all_keys()
@@ -222,8 +223,8 @@ async def redeem_key(client, message):
         user_info = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
         user_info += f" (@{user.username})" if user.username else ""
         
-        await client.send_message(
-            chat_id=admin_ids,
+        for admin_id in admin_ids:
+            await client.send_message(chat_id=admin_id,
             text=(
                 "🔑 Key Redeemed Notification\n"
                 f"├─ Key: `{key}`\n"
@@ -815,7 +816,7 @@ async def accept_payment(client, callback_query):
         "Example: `30d` for 30 days"
     )
 
-@app.on_message(filters.text & filters.user(admin_ids) & AuthenticatedUser())
+@app.on_message(filters.text & filters.user(admin_ids))
 async def process_key_duration(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -899,7 +900,7 @@ async def reject_payment(client, callback_query):
         "Please send the reason for rejection (this will be sent to the user):"
     )
 
-@app.on_message(filters.text & filters.user(admin_ids) & AuthenticatedUser())
+@app.on_message(filters.text & filters.user(admin_ids))
 async def process_reject_reason(client, message):
     user_id = message.from_user.id
     state = user_state.get(user_id)
@@ -1022,7 +1023,7 @@ async def delete_all_keys(client, message):
 @app.on_callback_query(filters.regex("^confirm_delete_all_keys$"))
 async def confirm_delete_all_keys(client, callback_query):
     try:
-        supabase.table("reku_keys").delete().neq("key", "").execute()
+        await supabase.table("reku_keys").delete().neq("key", "").execute()
         await callback_query.message.edit_text("✅ All keys have been permanently deleted.")
     except Exception as e:
         await callback_query.message.edit_text(f"❌ Error deleting keys: {str(e)}")
@@ -1073,7 +1074,7 @@ async def dice_game(client, message):
 
     try:
         # Query Supabase for up to 50 matching lines
-        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(50).execute()
+        res = await supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(50).execute()
         lines = [entry["line"] for entry in res.data if keyword.lower() in entry["line"].lower()]
 
         if not lines:
@@ -1244,7 +1245,7 @@ async def perform_search(client, callback_query):
     try:
         # ✅ Run Supabase query safely in async context
         loop = asyncio.get_running_loop()
-        res = await loop.run_in_executor(None, lambda: supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute())
+        res = await loop.run_in_executor(None, lambda: await supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute())
         entries = [row["line"] for row in res.data] if res.data else []
 
     except Exception as e:
@@ -1515,3 +1516,4 @@ async def handle_uploaded_document(client, message: Message):
                 os.remove("results_removedurl.txt")
 
 app.run()
+
