@@ -1179,34 +1179,31 @@ async def restricted(_, __, message: Message):
     user_id = message.from_user.id
 
     try:
-        # Allow premium users or admins
         if await check_user_access(user_id):
             return True
         if user_id in admin_ids:
             return True
 
-        # Cooldown for free users
         now = time.time()
         last_search = search_cooldowns.get(user_id, 0)
         if now - last_search < 60:
-            return False  # no await here
+            await message.reply("⏳ Please wait before using this command again.")
+            return False
 
         search_cooldowns[user_id] = now
         return True
 
     except Exception as e:
         print(f"[ERROR] restricted() failed: {e}")
+        await message.reply("❌ Access check failed.")
         return False
 
 # --- /search <keyword> command ---
-@app.on_message(filters.command("search"))
+@app.on_message(filters.command("search") & filters.create(restricted))
 async def search_command(client, message):
-    if not await restricted(client, None, message):
-        return await message.reply("⛔ You don't have access to this command.")
-
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        return await message.reply(
+        await message.reply(
             "❌ Please provide a keyword.\nUsage: <code>/search &lt;keyword&gt;</code>",
             parse_mode=ParseMode.HTML
         )
