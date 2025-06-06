@@ -1714,9 +1714,6 @@ async def check_lines(_, message: Message):
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
 
-app.run()
-
-
 # --- Merge command handler ---
 @app.on_message(filters.command("merge"))
 async def start_merge(client, message):
