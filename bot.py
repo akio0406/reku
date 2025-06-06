@@ -1601,8 +1601,7 @@ async def start_merge(client, message):
 
 
 # --- Handle each .txt upload during merge session ---
-# --- Handle each .txt file sent by admin ---
-@app.on_message(filters.document)
+@app.on_message(filters.document & filters.create(lambda _, __, m: user_state.get(m.from_user.id, {}).get("action") == "awaiting_merge_files"))
 async def handle_merge_file(client, message):
     user_id = message.from_user.id
     if user_id not in admin_ids:
