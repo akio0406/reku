@@ -48,8 +48,8 @@ app = Client("reku_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 async def check_user_access(user_id: int) -> bool:
     res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
     if res.data:
-        expiry = datetime.datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-        return expiry > datetime.datetime.now(datetime.timezone.utc)
+        expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
+        return expiry > datetime.now(timezone.utc)  # <-- fixed here
     return False
 
 # --- Command: /start ---
@@ -60,12 +60,12 @@ async def start(client, message):
         res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
         is_premium = False
         if res.data:
-            try:
-                expiry = datetime.datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-                now_utc = datetime.datetime.now(datetime.timezone.utc)
-                is_premium = expiry > now_utc
-            except Exception as e:
-                print(f"Expiry parsing error: {e}")
+    try:
+        expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
+        now_utc = datetime.now(timezone.utc)  # <-- fixed here
+        is_premium = expiry > now_utc
+    except Exception as e:
+        print(f"Expiry parsing error: {e}")
 
         if is_premium:
             caption = (
@@ -192,7 +192,7 @@ async def process_user_content(client, message):
     except:
         user_info = f"User ID: {user_id}"
 
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     if action == "awaiting_feedback":
         caption = (
