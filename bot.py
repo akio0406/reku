@@ -119,7 +119,12 @@ async def redeem_key(client, message):
     input_key = message.command[1]
     user_id = message.from_user.id
 
-    result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
+    try:
+        result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
+    except Exception as e:
+        print(f"[!] Error during key lookup: {e}")
+        return await message.reply("❌ An error occurred while checking the key.")
+
     data = result.data
 
     if not data:
@@ -130,12 +135,20 @@ async def redeem_key(client, message):
 
     expiry = datetime.now(timezone.utc) + timedelta(seconds=data["duration_seconds"])
 
-    supabase.table("keys_reku").update({
-        "redeemed": True,
-        "redeemed_by": user_id,
-        "redeemed_at": datetime.now(timezone.utc).isoformat(),
-        "expiry": expiry.isoformat()
-    }).eq("key", input_key).execute()
+    try:
+        update_res = supabase.table("keys_reku").update({
+            "redeemed": True,
+            "redeemed_by": user_id,
+            "redeemed_at": datetime.now(timezone.utc).isoformat(),
+            "expiry": expiry.isoformat()
+        }).eq("key", input_key).execute()
+
+        if not update_res.data:
+            print(f"[!] Failed to update key: {update_res.model_dump()}")
+            return await message.reply("❌ Failed to redeem the key. Please try again.")
+    except Exception as e:
+        print(f"[!] Update error: {e}")
+        return await message.reply("❌ An error occurred while redeeming the key.")
 
     readable_duration = str(timedelta(seconds=data["duration_seconds"]))
 
