@@ -117,8 +117,8 @@ async def generate_key(client, message):
     )
 
 def escape_md(text):
-    # Escape special characters for MarkdownV2
-    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
+    # Escape only *, _, and ` for Markdown (basic)
+    return re.sub(r'([*_`])', r'\\\1', str(text))
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
@@ -128,7 +128,6 @@ async def redeem_key(client, message):
     input_key = message.command[1]
     user_id = message.from_user.id
 
-    # Check if user has already redeemed a key
     try:
         user_keys = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).execute()
         if user_keys.data:
@@ -137,7 +136,6 @@ async def redeem_key(client, message):
         print(f"[!] Error checking user keys: {e}")
         return await message.reply("❌ Failed to check your key status. Please try again.")
 
-    # Lookup the input key
     try:
         result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
     except Exception as e:
@@ -151,13 +149,11 @@ async def redeem_key(client, message):
     if data.get("redeemed"):
         return await message.reply("❌ This key has already been redeemed.")
 
-    # Calculate expiry and convert to Philippine time
     expiry_utc = datetime.now(timezone.utc) + timedelta(seconds=data["duration_seconds"])
     ph_tz = pytz_timezone("Asia/Manila")
     expiry_ph = expiry_utc.astimezone(ph_tz)
     expiry_str = expiry_ph.strftime("%Y-%m-%d %H:%M:%S %Z%z")
 
-    # Update database to mark key as redeemed
     try:
         update_res = supabase.table("keys_reku").update({
             "redeemed": True,
@@ -173,7 +169,6 @@ async def redeem_key(client, message):
         print(f"[!] Update error: {e}")
         return await message.reply("❌ An error occurred while redeeming the key.")
 
-    # Format readable duration
     readable_duration = str(timedelta(seconds=data["duration_seconds"]))
 
     await message.reply(
@@ -181,8 +176,8 @@ async def redeem_key(client, message):
         f"🔑 *Key:* `{escape_md(input_key)}`\n"
         f"⏳ *Duration:* {escape_md(readable_duration)}\n"
         f"📅 *Expires on:* `{escape_md(expiry_str)}`\n\n"
-        f"Enjoy your premium access\\! Use /search to start finding accounts\\.",
-        parse_mode="markdownv2"
+        f"Enjoy your premium access! Use /search to start finding accounts.",
+        parse_mode="markdown"
     )
 
 @app.on_message(filters.command("myinfo"))
