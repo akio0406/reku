@@ -83,15 +83,15 @@ async def generate_key(client, message):
     key = generate_custom_key()
     attempts = 0
 
-    # Check if key exists (loop until unique or max attempts)
-    existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
-    while existing.data and attempts < 5:
-        key = generate_custom_key()
+    # Loop to avoid duplicates
+    while True:
         existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
+        if not existing.data:
+            break
+        key = generate_custom_key()
         attempts += 1
-
-    if existing.data:
-        return await message.reply("❌ Failed to generate a unique key. Try again.")
+        if attempts > 5:
+            return await message.reply("❌ Failed to generate a unique key. Try again.")
 
     # Insert new key
     insert_res = supabase.table("keys_reku").insert({
@@ -99,10 +99,9 @@ async def generate_key(client, message):
         "duration_seconds": duration_seconds
     }).execute()
 
-    # Check status code instead of .error attribute
-    if insert_res.status_code != 201:  # 201 = Created
-        print(f"[ERROR] Supabase insert failed with status code: {insert_res.status_code}")
-        return await message.reply("❌ Failed to save key to database.")
+    if insert_res.error:
+        print(f"Insertion failed: {insert_res.error.message}")
+        return await message.reply("❌ Failed to insert the key into the database.")
 
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
 
