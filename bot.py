@@ -46,6 +46,101 @@ def check_user_access(user_id: int) -> bool:
         print(f"Error checking user access: {e}")
         return False
 
+def generate_custom_key():
+    chars = string.ascii_uppercase + string.digits
+    return "REKU-" + ''.join(random.choices(chars, k=10))
+
+def parse_duration(duration_str: str) -> int:
+    match = re.fullmatch(r"(\d+)([dhm])", duration_str)
+    if not match:
+        return None
+
+    amount, unit = int(match.group(1)), match.group(2)
+
+    if unit == "d":
+        return amount * 86400  # 24 * 60 * 60
+    elif unit == "h":
+        return amount * 3600  # 60 * 60
+    elif unit == "m":
+        return amount * 60
+    else:
+        return None
+
+@app.on_message(filters.command("generate"))
+async def generate_key(client, message):
+    if message.from_user.id != ADMIN_ID:
+        return await message.reply("❌ You are not authorized to use this command.")
+
+    if len(message.command) < 2:
+        return await message.reply("Usage: /generate <duration> (e.g. 1d, 3h, 5m)")
+
+    duration_str = message.command[1].lower()
+    duration_seconds = parse_duration(duration_str)
+
+    if duration_seconds is None:
+        return await message.reply("❌ Invalid format. Use: 1d (days), 3h (hours), or 5m (minutes)")
+
+    key = generate_custom_key()
+    attempts = 0
+    existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
+
+    while existing.data and attempts < 5:
+        key = generate_custom_key()
+        existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
+        attempts += 1
+
+    if existing.data:
+        return await message.reply("❌ Failed to generate a unique key. Try again.")
+
+    insert_res = supabase.table("keys_reku").insert({
+        "key": key,
+        "duration_seconds": duration_seconds
+    }).execute()
+
+    if insert_res.error:
+        print(f"[ERROR] Supabase insert error: {insert_res.error}")
+        return await message.reply("❌ Failed to save key to database.")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+
+    await message.reply(
+        f"✅ Key generated:\n`{key}`\n"
+        f"Valid for {duration_str} (until {expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')})",
+        quote=True
+    )
+
+@app.on_message(filters.command("redeem"))
+async def redeem_key(client, message):
+    if len(message.command) < 2:
+        return await message.reply("Usage: /redeem <key>")
+
+    input_key = message.command[1]
+    user_id = message.from_user.id
+
+    result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
+    data = result.data
+
+    if not data:
+        return await message.reply("❌ Invalid key.")
+
+    if data.get("redeemed"):
+        return await message.reply("❌ This key has already been redeemed.")
+
+    expiry = datetime.now(timezone.utc) + timedelta(seconds=data["duration_seconds"])
+
+    supabase.table("keys_reku").update({
+        "redeemed": True,
+        "redeemed_by": user_id,
+        "redeemed_at": datetime.now(timezone.utc).isoformat(),
+        "expiry": expiry.isoformat()
+    }).eq("key", input_key).execute()
+
+    readable_duration = str(timedelta(seconds=data["duration_seconds"]))
+
+    await message.reply(
+        f"🎉 Key redeemed!\nPremium access granted for {readable_duration}."
+    )
+
 @app.on_message(filters.command("start"))
 async def start(client, message):
     try:
@@ -216,100 +311,5 @@ async def process_user_content(client, message):
         await message.reply(f"❌ Failed to send: {str(e)}")
     finally:
         user_state.pop(user_id, None)
-
-def generate_custom_key():
-    chars = string.ascii_uppercase + string.digits
-    return "REKU-" + ''.join(random.choices(chars, k=10))
-
-def parse_duration(duration_str: str) -> int:
-    match = re.fullmatch(r"(\d+)([dhm])", duration_str)
-    if not match:
-        return None
-
-    amount, unit = int(match.group(1)), match.group(2)
-
-    if unit == "d":
-        return amount * 86400  # 24 * 60 * 60
-    elif unit == "h":
-        return amount * 3600  # 60 * 60
-    elif unit == "m":
-        return amount * 60
-    else:
-        return None
-
-@app.on_message(filters.command("generate"))
-async def generate_key(client, message):
-    if message.from_user.id != ADMIN_ID:
-        return await message.reply("❌ You are not authorized to use this command.")
-
-    if len(message.command) < 2:
-        return await message.reply("Usage: /generate <duration> (e.g. 1d, 3h, 5m)")
-
-    duration_str = message.command[1].lower()
-    duration_seconds = parse_duration(duration_str)
-
-    if duration_seconds is None:
-        return await message.reply("❌ Invalid format. Use: 1d (days), 3h (hours), or 5m (minutes)")
-
-    key = generate_custom_key()
-    attempts = 0
-    existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
-
-    while existing.data and attempts < 5:
-        key = generate_custom_key()
-        existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
-        attempts += 1
-
-    if existing.data:
-        return await message.reply("❌ Failed to generate a unique key. Try again.")
-
-    insert_res = supabase.table("keys_reku").insert({
-        "key": key,
-        "duration_seconds": duration_seconds
-    }).execute()
-
-    if insert_res.error:
-        print(f"[ERROR] Supabase insert error: {insert_res.error}")
-        return await message.reply("❌ Failed to save key to database.")
-
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-
-    await message.reply(
-        f"✅ Key generated:\n`{key}`\n"
-        f"Valid for {duration_str} (until {expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')})",
-        quote=True
-    )
-
-@app.on_message(filters.command("redeem"))
-async def redeem_key(client, message):
-    if len(message.command) < 2:
-        return await message.reply("Usage: /redeem <key>")
-
-    input_key = message.command[1]
-    user_id = message.from_user.id
-
-    result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
-    data = result.data
-
-    if not data:
-        return await message.reply("❌ Invalid key.")
-
-    if data.get("redeemed"):
-        return await message.reply("❌ This key has already been redeemed.")
-
-    expiry = datetime.now(timezone.utc) + timedelta(seconds=data["duration_seconds"])
-
-    supabase.table("keys_reku").update({
-        "redeemed": True,
-        "redeemed_by": user_id,
-        "redeemed_at": datetime.now(timezone.utc).isoformat(),
-        "expiry": expiry.isoformat()
-    }).eq("key", input_key).execute()
-
-    readable_duration = str(timedelta(seconds=data["duration_seconds"]))
-
-    await message.reply(
-        f"🎉 Key redeemed!\nPremium access granted for {readable_duration}."
-    )
 
 app.run()
