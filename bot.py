@@ -1,22 +1,12 @@
 import os
-import json
-import time
-import random
-import asyncio
-import requests
-import pytz
 import re
-from nanoid import generate
-from uuid import uuid4
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-
+import random
 import logging
-logging.basicConfig(level=logging.INFO)
+from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from supabase import create_client
 
@@ -35,7 +25,12 @@ SUPABASE_HEADERS = {
 }
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-admin_ids = [int(i.strip()) for i in os.getenv("ADMIN_ID", "5110224851").split(",") if i.strip().isdigit()]
+
+# Fix: Strip quotes Railway adds around env vars with commas
+admin_raw = os.getenv("ADMIN_ID", "5110224851")
+admin_raw = admin_raw.strip('"').strip("'")  # Remove leading/trailing quotes if any
+
+admin_ids = [int(i.strip()) for i in admin_raw.split(",") if i.strip().isdigit()]
 print("Admin IDs loaded:", admin_ids)
 
 app = Client("reku_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
