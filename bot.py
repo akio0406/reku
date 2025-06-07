@@ -105,7 +105,7 @@ async def generate_key(client, message):
 
     # Format expiry in Philippine time
     expires_at_utc = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-    ph_tz = timezone("Asia/Manila")
+    ph_tz = pytz_timezone("Asia/Manila")  # Correct: use pytz_timezone alias for pytz.timezone
     expires_at_ph = expires_at_utc.astimezone(ph_tz)
 
     await message.reply(
