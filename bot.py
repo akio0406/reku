@@ -59,13 +59,14 @@ async def start(client, message):
         user_id = message.from_user.id
         res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
         is_premium = False
+
         if res.data:
-    try:
-        expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-        now_utc = datetime.now(timezone.utc)  # <-- fixed here
-        is_premium = expiry > now_utc
-    except Exception as e:
-        print(f"Expiry parsing error: {e}")
+            try:
+                expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)  # <-- fixed here
+                is_premium = expiry > now_utc
+            except Exception as e:
+                print(f"Expiry parsing error: {e}")
 
         if is_premium:
             caption = (
