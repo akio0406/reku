@@ -410,30 +410,30 @@ async def process_user_content(client, message):
 
 @app.on_message(filters.command("search"))
 async def search_line(client: Client, message: Message):
+    print("📥 /search command received")
+
     if len(message.command) < 2:
-        return await message.reply("❌ Usage: /search <keyword>", quote=True)
+        return await message.reply("❌ Usage: /search <keyword>")
 
     keyword = message.command[1].lower()
-    print(f"🔍 Running search for keyword: {keyword}")
+    print(f"🔍 Searching for: {keyword}")
 
     try:
-        result = supabase.table("reku") \
-            .select("*") \
-            .ilike("line", f"%{keyword}%") \
-            .execute()
+        result = supabase.table("reku").select("*").ilike("line", f"%{keyword}%").execute()
+        print("🧪 Supabase result:", result)
 
         rows = result.data or []
-        print(f"✅ Total matches: {len(rows)}")
+        print(f"✅ Rows fetched: {len(rows)}")
 
         if not rows:
-            return await message.reply("🔍 No matching lines found.", quote=True)
+            return await message.reply("🔍 No matching lines found.")
 
         sample_size = min(len(rows), max(1, random.randint(100, 150)))
         selected_rows = random.sample(rows, sample_size)
 
-        formatted_entries = []
+        formatted = []
         for row in selected_rows:
-            formatted_entries.append(
+            formatted.append(
                 f"🆔 ID: `{row.get('id', 'N/A')}`\n"
                 f"📁 Category: `{row.get('category', 'N/A')}`\n"
                 f"👤 Username: `{row.get('username', 'N/A')}`\n"
@@ -443,23 +443,22 @@ async def search_line(client: Client, message: Message):
                 "───────────────"
             )
 
-        file_content = "\n\n".join(formatted_entries)
+        file_content = "\n\n".join(formatted)
         filename = f"ISAGI's_{keyword}.txt"
 
         with open(filename, "w", encoding="utf-8") as f:
             f.write(file_content)
+        print(f"📁 File saved: {filename}")
 
         await message.reply_document(
             document=filename,
-            caption=f"📄 Search results for `{keyword}` ({len(selected_rows)} entries)",
-            quote=True
+            caption=f"📄 Results for `{keyword}` ({sample_size} entries)"
         )
 
-        os.remove(filename)
+        # os.remove(filename)  # optional
 
     except Exception as e:
-        print("❌ Error during /search command")
-        traceback.print_exc()
-        await message.reply("❌ An error occurred while processing the search.", quote=True)
+        print("❌ Error in /search:", e)
+        await message.reply("❌ An error occurred during search.")
 
 app.run()
