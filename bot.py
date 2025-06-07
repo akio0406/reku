@@ -4,9 +4,12 @@ import time
 import random
 import asyncio
 import datetime
+import requests
 import pytz
 from uuid import uuid4
 from collections import defaultdict
+
+from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
@@ -20,6 +23,12 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+SUPABASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
 
 # --- Supabase Client ---
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -243,7 +252,7 @@ def store_key(key, duration, owner_id):
 
     return response.status_code == 201
 
-@app.on_message(filters.command("generate") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("generate") & filters.user(admin_ids))
 async def generate_key(client, message):
     try:
         args = message.text.split()
