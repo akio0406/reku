@@ -243,21 +243,7 @@ async def process_user_content(client, message):
         user_state.pop(user_id, None)
         
 # --- Timezone helper ---
-def store_key(key, duration, owner_id):
-    try:
-        expiry_time = (datetime.now(timezone.utc) + duration).isoformat()
-        data = {
-            "key": key,
-            "expiry": expiry_time,
-            "owner_id": owner_id
-        }
-
-        response = requests.post(f"{SUPABASE_URL}/rest/v1/reku_keys", headers=SUPABASE_HEADERS, json=data)
-        print("🔍 Supabase Response:", response.status_code, response.text)
-        return response.status_code == 201
-    except Exception as e:
-        print("❌ Error in store_key:", str(e))
-        return False
+import httpx
 
 @app.on_message(filters.command("generate"))
 async def generate_key(client, message):
@@ -286,85 +272,88 @@ async def generate_key(client, message):
 
         key = "REKU-" + ''.join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
 
-        success = store_key(key, duration, message.from_user.id)
-        if success:
-            expiry_time = (datetime.now(timezone.utc) + duration).astimezone(pytz.timezone("Asia/Manila")).strftime('%Y-%m-%d %H:%M:%S')
-            await message.reply(f"✅ **Generated Key:** `{key}`\n⏳ **Expires at (PHT):** `{expiry_time}`")
+        # Use async httpx here:
+        async with httpx.AsyncClient() as client_http:
+            expiry_time = (datetime.now(timezone.utc) + duration).isoformat()
+            data = {
+                "key": key,
+                "expiry": expiry_time,
+                "owner_id": message.from_user.id
+            }
+            response = await client_http.post(f"{SUPABASE_URL}/rest/v1/reku_keys", headers=SUPABASE_HEADERS, json=data)
+            print("🔍 Supabase Response:", response.status_code, response.text)
+
+        if response.status_code == 201:
+            expiry_time_pht = (datetime.now(timezone.utc) + duration).astimezone(pytz.timezone("Asia/Manila")).strftime('%Y-%m-%d %H:%M:%S')
+            await message.reply(f"✅ **Generated Key:** `{key}`\n⏳ **Expires at (PHT):** `{expiry_time_pht}`")
         else:
             await message.reply("❌ Failed to generate key. Try again later.")
+
     except Exception as e:
         await message.reply(f"❌ Error: {str(e)}")
+
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
     try:
         args = message.text.split()
         if len(args) != 2:
-            await message.reply("❌ Usage: /redeem <key>")
-            return
+            return await message.reply("❌ Usage: /redeem <key>")
 
         key = args[1]
         user_id = message.from_user.id
 
-        # Check if the user is already in the 'users' table
-        response = requests.get(f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}", headers=SUPABASE_HEADERS)
-        if response.status_code != 200:
-            await message.reply(f"❌ Error checking user existence: {response.status_code} - {response.text}")
-            return
+        async with httpx.AsyncClient() as client_http:
+            # Check user existence
+            response = await client_http.get(f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}", headers=SUPABASE_HEADERS)
+            if response.status_code != 200:
+                return await message.reply(f"❌ Error checking user existence: {response.status_code} - {response.text}")
 
-        if not response.json():
-            # If the user does not exist, insert them into the 'users' table
-            user_data = {
-                "id": user_id,
-                "username": message.from_user.username or ""  # Optional: Store username if needed
-            }
-            insert_response = requests.post(f"{SUPABASE_URL}/rest/v1/users", headers=SUPABASE_HEADERS, json=user_data)
-            if insert_response.status_code != 201:
-                await message.reply(f"❌ Error adding user: {insert_response.status_code} - {insert_response.text}")
-                return
+            if not response.json():
+                user_data = {
+                    "id": user_id,
+                    "username": message.from_user.username or ""
+                }
+                insert_response = await client_http.post(f"{SUPABASE_URL}/rest/v1/users", headers=SUPABASE_HEADERS, json=user_data)
+                if insert_response.status_code != 201:
+                    return await message.reply(f"❌ Error adding user: {insert_response.status_code} - {insert_response.text}")
 
-        # Check if the user has already redeemed a key
-        response = requests.get(f"{SUPABASE_URL}/rest/v1/reku_keys?redeemed_by=eq.{user_id}", headers=SUPABASE_HEADERS)
-        if response.status_code != 200:
-            await message.reply(f"❌ Error checking redemption: {response.status_code} - {response.text}")
-            return
-        if response.json():
-            await message.reply("❌ You have already redeemed a key.")
-            return
+            # Check redemption
+            response = await client_http.get(f"{SUPABASE_URL}/rest/v1/reku_keys?redeemed_by=eq.{user_id}", headers=SUPABASE_HEADERS)
+            if response.status_code != 200:
+                return await message.reply(f"❌ Error checking redemption: {response.status_code} - {response.text}")
+            if response.json():
+                return await message.reply("❌ You have already redeemed a key.")
 
-        # Check if key exists and is not redeemed
-        response = requests.get(f"{SUPABASE_URL}/rest/v1/reku_keys?key=eq.{key}", headers=SUPABASE_HEADERS)
-        if response.status_code != 200:
-            await message.reply(f"❌ Error fetching key: {response.status_code} - {response.text}")
-            return
+            # Check key existence
+            response = await client_http.get(f"{SUPABASE_URL}/rest/v1/reku_keys?key=eq.{key}", headers=SUPABASE_HEADERS)
+            if response.status_code != 200:
+                return await message.reply(f"❌ Error fetching key: {response.status_code} - {response.text}")
 
-        keys = response.json()
-        if not keys:
-            await message.reply("❌ Invalid or expired key!")
-            return
+            keys = response.json()
+            if not keys:
+                return await message.reply("❌ Invalid or expired key!")
 
-        key_data = keys[0]
-        if key_data["redeemed_by"]:
-            await message.reply("❌ This key has already been redeemed!")
-            return
+            key_data = keys[0]
+            if key_data["redeemed_by"]:
+                return await message.reply("❌ This key has already been redeemed!")
 
-        expiry_time_utc = datetime.fromisoformat(key_data["expiry"]).replace(tzinfo=timezone.utc)
-        expiry_time_pht = expiry_time_utc.astimezone(pytz.timezone("Asia/Manila"))
+            expiry_time_utc = datetime.fromisoformat(key_data["expiry"]).replace(tzinfo=timezone.utc)
+            expiry_time_pht = expiry_time_utc.astimezone(pytz.timezone("Asia/Manila"))
 
-        if expiry_time_utc < datetime.now(timezone.utc):
-            await message.reply("❌ This key has expired!")
-            return
+            if expiry_time_utc < datetime.now(timezone.utc):
+                return await message.reply("❌ This key has expired!")
 
-        # Redeem key by updating "redeemed_by"
-        update_data = {"redeemed_by": user_id}
-        response = requests.patch(f"{SUPABASE_URL}/rest/v1/reku_keys?key=eq.{key}", headers=SUPABASE_HEADERS, json=update_data)
+            # Redeem key
+            update_data = {"redeemed_by": user_id}
+            response = await client_http.patch(f"{SUPABASE_URL}/rest/v1/reku_keys?key=eq.{key}", headers=SUPABASE_HEADERS, json=update_data)
 
         if response.status_code in [200, 204]:
             expiry_str = expiry_time_pht.strftime('%Y-%m-%d %H:%M:%S')
             await message.reply(f"✅ Key successfully redeemed! Kindly use /list to see all the available commands.\n⏳ **Expires at (PHT):** {expiry_str}")
         else:
-            # Log the error message from Supabase response for debugging
             await message.reply(f"❌ Error redeeming key. Status code: {response.status_code} - {response.text}")
+
     except Exception as e:
         await message.reply(f"❌ Error: {str(e)}")
 
