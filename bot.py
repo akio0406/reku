@@ -173,10 +173,10 @@ async def redeem_key(client, message):
     readable_duration = str(timedelta(seconds=data["duration_seconds"]))
 
     await message.reply(
-        f"🎉 Key redeemed successfully!\n\n"
-        f"🔑 Key: `{input_key}`\n"
-        f"⏳ Duration: {readable_duration}\n"
-        f"📅 Expires on: `{expiry_str}`\n\n"
+        f"🎉 <b>Key redeemed successfully!</b><br><br>"
+        f"🔑 <b>Key:</b> <code>{input_key}</code><br>"
+        f"⏳ <b>Duration:</b> {readable_duration}<br>"
+        f"📅 <b>Expires on:</b> <code>{expiry_str}</code><br><br>"
         f"Enjoy your premium access! Use /search to start finding accounts.",
         parse_mode="html"
     )
