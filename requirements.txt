@@ -5,3 +5,4 @@ requests
 httpx
 supabase==1.0.3
 pycryptodome
+nanoid
