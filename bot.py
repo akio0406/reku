@@ -8,7 +8,7 @@ from pytz import timezone as pytz_timezone          # renamed to avoid conflict
 
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message  # ✅ Added Message here
 
 from supabase import create_client
 
