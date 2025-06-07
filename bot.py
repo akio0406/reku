@@ -178,7 +178,7 @@ async def redeem_key(client, message):
         f"⏳ Duration: {readable_duration}\n"
         f"📅 Expires on: `{expiry_str}`\n\n"
         f"Enjoy your premium access! Use /search to start finding accounts.",
-        parse_mode="markdown"
+        parse_mode="html"
     )
 
 @app.on_message(filters.command("myinfo"))
