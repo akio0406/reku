@@ -84,7 +84,6 @@ async def generate_key(client, message):
     key = generate_custom_key()
     attempts = 0
 
-    # Loop to avoid duplicates
     while True:
         existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
         if not existing.data:
@@ -94,7 +93,6 @@ async def generate_key(client, message):
         if attempts > 5:
             return await message.reply("❌ Failed to generate a unique key. Try again.")
 
-    # Insert new key
     insert_res = supabase.table("keys_reku").insert({
         "key": key,
         "duration_seconds": duration_seconds
@@ -104,24 +102,16 @@ async def generate_key(client, message):
         print(f"Insertion failed: {insert_res.model_dump()}")
         return await message.reply("❌ Failed to insert the key into the database.")
 
-    # Convert expiry to Philippine time
-    ph_tz = timezone("Asia/Manila")
+    # Format expiry in Philippine time
     expires_at_utc = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+    ph_tz = timezone("Asia/Manila")
     expires_at_ph = expires_at_utc.astimezone(ph_tz)
 
     await message.reply(
         f"✅ Key generated successfully!\n"
         f"🔑 Key: `{key}`\n"
         f"⏳ Duration: {duration_str}\n"
-        f"📅 Expires on: `{expires_at_ph.strftime('%Y-%m-%d %H:%M:%S')} PH Time`",
-        quote=True
-    )
-
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-
-    await message.reply(
-        f"✅ Key generated:\n`{key}`\n"
-        f"Valid for {duration_str} (until {expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')})",
+        f"📅 Expires on: `{expires_at_ph.isoformat(sep='T', timespec='seconds')}`",
         quote=True
     )
 
