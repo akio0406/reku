@@ -20,14 +20,12 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from supabase import create_client
 
-# --- Environment Variables ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Debug environment
 print("ENV loaded -> API_ID:", API_ID, "| BOT_TOKEN starts with:", BOT_TOKEN[:8])
 
 SUPABASE_HEADERS = {
@@ -36,17 +34,12 @@ SUPABASE_HEADERS = {
     "Content-Type": "application/json"
 }
 
-# --- Supabase Client ---
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# --- Admin IDs ---
 admin_ids = [int(i.strip()) for i in os.getenv("ADMIN_ID", "5110224851").split(",") if i.strip().isdigit()]
 print("Admin IDs loaded:", admin_ids)
 
-# --- Pyrogram App ---
 app = Client("reku_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# --- Access Check ---
 async def check_user_access(user_id: int) -> bool:
     res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
     if res.data:
@@ -54,7 +47,6 @@ async def check_user_access(user_id: int) -> bool:
         return expiry > datetime.now(timezone.utc)
     return False
 
-# --- Command: /start ---
 @app.on_message(filters.command("start"))
 async def start(client, message):
     try:
@@ -65,8 +57,7 @@ async def start(client, message):
         if res.data:
             try:
                 expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-                now_utc = datetime.now(timezone.utc)
-                is_premium = expiry > now_utc
+                is_premium = expiry > datetime.now(timezone.utc)
             except Exception as e:
                 print(f"Expiry parsing error: {e}")
 
@@ -106,7 +97,6 @@ async def start(client, message):
         await message.reply_text("❌ An error occurred in /start.")
         print(f"Error in /start: {e}")
 
-# --- Command: /help ---
 @app.on_message(filters.command("help"))
 async def help_command(client, message):
     help_text = (
@@ -129,7 +119,6 @@ async def help_command(client, message):
     )
     await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
-# --- User Send ---
 user_state = {}
 
 @app.on_message(filters.command("send"))
@@ -139,7 +128,6 @@ async def send_command(client, message):
          InlineKeyboardButton("💳 Payment", callback_data="send_payment")],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel_action")]
     ])
-
     await message.reply("📨 What would you like to send?", reply_markup=keyboard)
 
 @app.on_callback_query()
@@ -167,7 +155,7 @@ async def handle_callback(client, callback_query):
             "📝 Example caption:\n"
             "<code>Payment for Premium Access - ₱200</code>\n\n"
             "Type /cancel to abort.",
-            parse_mode=enums.ParseMode.HTML
+            parse_mode=ParseMode.HTML
         )
     elif data == "cancel_action":
         user_state.pop(user_id, None)
@@ -219,40 +207,23 @@ async def process_user_content(client, message):
     try:
         for admin_id in admin_ids:
             if message.photo:
-                await client.send_photo(
-                    chat_id=admin_id,
-                    photo=message.photo.file_id,
-                    caption=caption,
-                    parse_mode=enums.ParseMode.MARKDOWN
-                )
+                await client.send_photo(admin_id, message.photo.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
             elif message.video:
-                await client.send_video(
-                    chat_id=admin_id,
-                    video=message.video.file_id,
-                    caption=caption,
-                    parse_mode=enums.ParseMode.MARKDOWN
-                )
+                await client.send_video(admin_id, message.video.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
             else:
-                await client.send_message(
-                    chat_id=admin_id,
-                    text=caption,
-                    parse_mode=enums.ParseMode.MARKDOWN
-                )
+                await client.send_message(admin_id, caption, parse_mode=ParseMode.MARKDOWN)
         await message.reply("✅ Your message has been sent to the admin. Thank you!")
     except Exception as e:
         await message.reply(f"❌ Failed to send: {str(e)}")
     finally:
         user_state.pop(user_id, None)
 
-# --- Timezone helper ---
 def parse_duration(duration: str):
     match = re.fullmatch(r"(\d+)([mhdys])", duration.lower())
     if not match:
         return None
-
     amount = int(match.group(1))
     unit = match.group(2)
-
     now = datetime.now(timezone.utc)
     if unit == "m":
         return now + timedelta(minutes=amount)
@@ -261,14 +232,10 @@ def parse_duration(duration: str):
     elif unit == "d":
         return now + timedelta(days=amount)
     elif unit == "y":
-        # Approximate 1 year = 365 days
         return now + timedelta(days=365 * amount)
-    else:
-        return None
+    return None
 
-# Generate key: ISAGI-XXXXXXXXXX
 def generate_key():
-    # Generate 10 chars from uppercase letters and digits
     return "ISAGI-" + generate("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 10)
 
 @app.on_message(filters.command("generate"))
@@ -288,14 +255,7 @@ async def generate_handler(client, message):
         return
 
     key = generate_key()
-
-    # Insert into supabase
-    data = {
-        "key": key,
-        "expiry": expiry.isoformat(),
-        "redeemed_by": None,
-        "owner_id": message.from_user.id
-    }
+    data = {"key": key, "expiry": expiry.isoformat(), "redeemed_by": None, "owner_id": message.from_user.id}
     response = supabase.table("reku_keys").insert(data).execute()
 
     if response.error:
@@ -311,27 +271,21 @@ async def redeem_handler(client, message):
         return
 
     key = message.command[1].upper()
-
-    # Fetch key info from supabase
     response = supabase.table("reku_keys").select("*").eq("key", key).execute()
     if response.error or not response.data:
         await message.reply_text("Invalid key.")
         return
 
     key_data = response.data[0]
-
     if key_data.get("redeemed_by") is not None:
         await message.reply_text("This key has already been redeemed.")
         return
 
     expiry = datetime.fromisoformat(key_data["expiry"])
-    now = datetime.now(timezone.utc)
-
-    if expiry < now:
+    if expiry < datetime.now(timezone.utc):
         await message.reply_text("This key has expired.")
         return
 
-    # Mark as redeemed
     update_resp = supabase.table("reku_keys").update({"redeemed_by": message.from_user.id}).eq("key", key).execute()
     if update_resp.error:
         await message.reply_text("Failed to redeem key. Please try again later.")
@@ -339,7 +293,6 @@ async def redeem_handler(client, message):
 
     await message.reply_text("Key redeemed successfully! 🎉")
 
-# --- Run Bot ---
 if __name__ == "__main__":
     print("Bot starting...")
     app.run()
