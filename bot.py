@@ -5,6 +5,8 @@ import random
 import asyncio
 import requests
 import pytz
+import re
+from nanoid import generate
 from uuid import uuid4
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -49,7 +51,7 @@ async def check_user_access(user_id: int) -> bool:
     res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
     if res.data:
         expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-        return expiry > datetime.now(timezone.utc)  # <-- fixed here
+        return expiry > datetime.now(timezone.utc)
     return False
 
 # --- Command: /start ---
@@ -63,7 +65,7 @@ async def start(client, message):
         if res.data:
             try:
                 expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-                now_utc = datetime.now(timezone.utc)  # <-- fixed here
+                now_utc = datetime.now(timezone.utc)
                 is_premium = expiry > now_utc
             except Exception as e:
                 print(f"Expiry parsing error: {e}")
@@ -241,121 +243,101 @@ async def process_user_content(client, message):
         await message.reply(f"❌ Failed to send: {str(e)}")
     finally:
         user_state.pop(user_id, None)
-        
+
 # --- Timezone helper ---
-import httpx
+def parse_duration(duration: str):
+    match = re.fullmatch(r"(\d+)([mhdys])", duration.lower())
+    if not match:
+        return None
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+
+    now = datetime.now(timezone.utc)
+    if unit == "m":
+        return now + timedelta(minutes=amount)
+    elif unit == "h":
+        return now + timedelta(hours=amount)
+    elif unit == "d":
+        return now + timedelta(days=amount)
+    elif unit == "y":
+        # Approximate 1 year = 365 days
+        return now + timedelta(days=365 * amount)
+    else:
+        return None
+
+# Generate key: ISAGI-XXXXXXXXXX
+def generate_key():
+    # Generate 10 chars from uppercase letters and digits
+    return "ISAGI-" + generate("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 10)
 
 @app.on_message(filters.command("generate"))
-async def generate_key(client, message):
-    print("✅ /generate received")
-    print("🧾 Raw message:", message.text)
-    print("👤 From user ID:", message.from_user.id)
-    await message.reply("✅ You triggered /generate — this is a test response.")
+async def generate_handler(client, message):
+    if message.from_user.id not in admin_ids:
+        await message.reply_text("❌ You are not authorized to use this command.")
+        return
 
-    try:
-        args = message.text.split()
-        if len(args) != 2:
-            return await message.reply("❌ Usage: `/generate <duration>` (e.g., `/generate 1d`)")
+    if len(message.command) != 2:
+        await message.reply_text("Usage: /generate <duration>\nExample: /generate 10m or 2h or 1d or 1y")
+        return
 
-        duration_str = args[1]
-        unit = duration_str[-1]
-        amount = int(duration_str[:-1])
+    duration_str = message.command[1]
+    expiry = parse_duration(duration_str)
+    if not expiry:
+        await message.reply_text("Invalid duration format. Use number followed by m/h/d/y, e.g., 10m, 2h, 1d, 1y")
+        return
 
-        duration = {
-            "m": timedelta(minutes=amount),
-            "h": timedelta(hours=amount),
-            "d": timedelta(days=amount)
-        }.get(unit)
+    key = generate_key()
 
-        if not duration:
-            return await message.reply("❌ Invalid format! Use `m`, `h`, or `d`.")
+    # Insert into supabase
+    data = {
+        "key": key,
+        "expiry": expiry.isoformat(),
+        "redeemed_by": None,
+        "owner_id": message.from_user.id
+    }
+    response = supabase.table("reku_keys").insert(data).execute()
 
-        key = "REKU-" + ''.join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
+    if response.error:
+        await message.reply_text("Failed to generate key, please try again later.")
+        return
 
-        # Use async httpx here:
-        async with httpx.AsyncClient() as client_http:
-            expiry_time = (datetime.now(timezone.utc) + duration).isoformat()
-            data = {
-                "key": key,
-                "expiry": expiry_time,
-                "owner_id": message.from_user.id
-            }
-            response = await client_http.post(f"{SUPABASE_URL}/rest/v1/reku_keys", headers=SUPABASE_HEADERS, json=data)
-            print("🔍 Supabase Response:", response.status_code, response.text)
-
-        if response.status_code == 201:
-            expiry_time_pht = (datetime.now(timezone.utc) + duration).astimezone(pytz.timezone("Asia/Manila")).strftime('%Y-%m-%d %H:%M:%S')
-            await message.reply(f"✅ **Generated Key:** `{key}`\n⏳ **Expires at (PHT):** `{expiry_time_pht}`")
-        else:
-            await message.reply("❌ Failed to generate key. Try again later.")
-
-    except Exception as e:
-        await message.reply(f"❌ Error: {str(e)}")
-
+    await message.reply_text(f"Key generated:\n`{key}`\nExpires at: {expiry.strftime('%Y-%m-%d %H:%M:%S UTC')}", parse_mode="markdown")
 
 @app.on_message(filters.command("redeem"))
-async def redeem_key(client, message):
-    try:
-        args = message.text.split()
-        if len(args) != 2:
-            return await message.reply("❌ Usage: /redeem <key>")
+async def redeem_handler(client, message):
+    if len(message.command) != 2:
+        await message.reply_text("Usage: /redeem <key>")
+        return
 
-        key = args[1]
-        user_id = message.from_user.id
+    key = message.command[1].upper()
 
-        async with httpx.AsyncClient() as client_http:
-            # Check user existence
-            response = await client_http.get(f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}", headers=SUPABASE_HEADERS)
-            if response.status_code != 200:
-                return await message.reply(f"❌ Error checking user existence: {response.status_code} - {response.text}")
+    # Fetch key info from supabase
+    response = supabase.table("reku_keys").select("*").eq("key", key).execute()
+    if response.error or not response.data:
+        await message.reply_text("Invalid key.")
+        return
 
-            if not response.json():
-                user_data = {
-                    "id": user_id,
-                    "username": message.from_user.username or ""
-                }
-                insert_response = await client_http.post(f"{SUPABASE_URL}/rest/v1/users", headers=SUPABASE_HEADERS, json=user_data)
-                if insert_response.status_code != 201:
-                    return await message.reply(f"❌ Error adding user: {insert_response.status_code} - {insert_response.text}")
+    key_data = response.data[0]
 
-            # Check redemption
-            response = await client_http.get(f"{SUPABASE_URL}/rest/v1/reku_keys?redeemed_by=eq.{user_id}", headers=SUPABASE_HEADERS)
-            if response.status_code != 200:
-                return await message.reply(f"❌ Error checking redemption: {response.status_code} - {response.text}")
-            if response.json():
-                return await message.reply("❌ You have already redeemed a key.")
+    if key_data.get("redeemed_by") is not None:
+        await message.reply_text("This key has already been redeemed.")
+        return
 
-            # Check key existence
-            response = await client_http.get(f"{SUPABASE_URL}/rest/v1/reku_keys?key=eq.{key}", headers=SUPABASE_HEADERS)
-            if response.status_code != 200:
-                return await message.reply(f"❌ Error fetching key: {response.status_code} - {response.text}")
+    expiry = datetime.fromisoformat(key_data["expiry"])
+    now = datetime.now(timezone.utc)
 
-            keys = response.json()
-            if not keys:
-                return await message.reply("❌ Invalid or expired key!")
+    if expiry < now:
+        await message.reply_text("This key has expired.")
+        return
 
-            key_data = keys[0]
-            if key_data["redeemed_by"]:
-                return await message.reply("❌ This key has already been redeemed!")
+    # Mark as redeemed
+    update_resp = supabase.table("reku_keys").update({"redeemed_by": message.from_user.id}).eq("key", key).execute()
+    if update_resp.error:
+        await message.reply_text("Failed to redeem key. Please try again later.")
+        return
 
-            expiry_time_utc = datetime.fromisoformat(key_data["expiry"]).replace(tzinfo=timezone.utc)
-            expiry_time_pht = expiry_time_utc.astimezone(pytz.timezone("Asia/Manila"))
-
-            if expiry_time_utc < datetime.now(timezone.utc):
-                return await message.reply("❌ This key has expired!")
-
-            # Redeem key
-            update_data = {"redeemed_by": user_id}
-            response = await client_http.patch(f"{SUPABASE_URL}/rest/v1/reku_keys?key=eq.{key}", headers=SUPABASE_HEADERS, json=update_data)
-
-        if response.status_code in [200, 204]:
-            expiry_str = expiry_time_pht.strftime('%Y-%m-%d %H:%M:%S')
-            await message.reply(f"✅ Key successfully redeemed! Kindly use /list to see all the available commands.\n⏳ **Expires at (PHT):** {expiry_str}")
-        else:
-            await message.reply(f"❌ Error redeeming key. Status code: {response.status_code} - {response.text}")
-
-    except Exception as e:
-        await message.reply(f"❌ Error: {str(e)}")
+    await message.reply_text("Key redeemed successfully! 🎉")
 
 # --- Run Bot ---
 if __name__ == "__main__":
