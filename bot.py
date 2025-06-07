@@ -34,7 +34,7 @@ SUPABASE_HEADERS = {
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Admin IDs ---
-admin_ids = [5110224851, 6649502398]
+admin_ids = [int(i.strip()) for i in os.getenv("ADMIN_ID", "5110224851").split(",") if i.strip().isdigit()]
 print("Admin IDs loaded:", admin_ids)
 
 # --- Pyrogram App ---
