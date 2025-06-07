@@ -408,9 +408,15 @@ async def process_user_content(client, message):
     finally:
         user_state.pop(user_id, None)
 
+@app.on_message(filters.command("ping"))
+async def ping(client: Client, message: Message):
+    print("✅ /ping received")
+    await message.reply("🏓 Pong!")
+
 @app.on_message(filters.command("search"))
 async def search_line(client: Client, message: Message):
-    print("📥 /search command received")
+    print("📥 /search received")
+    await message.reply("This is a test search reply!")
 
     if len(message.command) < 2:
         return await message.reply("❌ Usage: /search <keyword>")
