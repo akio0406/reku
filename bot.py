@@ -221,164 +221,86 @@ async def process_user_content(client, message):
     finally:
         user_state.pop(user_id, None)
 
-from datetime import datetime, timedelta, timezone
-import random
 import re
+import random
+import string
+
+def generate_custom_key():
+    chars = string.ascii_uppercase + string.digits
+    return "REKU-" + ''.join(random.choices(chars, k=10))
+
+def parse_duration(duration_str: str) -> int:
+    match = re.fullmatch(r"(\d+)([dhm])", duration_str)
+    if not match:
+        return None
+
+    amount, unit = int(match.group(1)), match.group(2)
+
+    if unit == "d":
+        return amount * 86400  # 24 * 60 * 60
+    elif unit == "h":
+        return amount * 3600  # 60 * 60
+    elif unit == "m":
+        return amount * 60
+    else:
+        return None
 
 @app.on_message(filters.command("generate") & filters.user(ADMIN_ID))
 async def generate_key(client, message):
-    print(f"/generate command received from user {message.from_user.id} with text: {message.text}")  # Debug print
-    try:
-        args = message.text.split()
-        if len(args) < 2:
-            return await message.reply(
-                "❌ Usage: `/generate <duration>`\n"
-                "Examples:\n`/generate 30d` - 30 days\n"
-                "`/generate 1w` - 1 week\n`/generate 12h` - 12 hours",
-                parse_mode=ParseMode.MARKDOWN
-            )
+    if len(message.command) < 2:
+        return await message.reply("Usage: /generate <duration> (e.g. 1d, 3h, 5m)")
 
-        duration_str = args[1].lower()
-        match = re.fullmatch(r"(\d+)([hdwy])", duration_str)
-        if not match:
-            return await message.reply(
-                "❌ Invalid format. Use:\n- `h` = hours\n- `d` = days\n- `w` = weeks\n- `y` = years\n"
-                "Example: `/generate 7d`",
-                parse_mode=ParseMode.MARKDOWN
-            )
+    duration_str = message.command[1].lower()
+    duration_seconds = parse_duration(duration_str)
 
-        value, unit = int(match.group(1)), match.group(2)
-        now = datetime.now(timezone.utc)
-        expiry = {
-            "h": now + timedelta(hours=value),
-            "d": now + timedelta(days=value),
-            "w": now + timedelta(weeks=value),
-            "y": now + timedelta(days=365 * value)
-        }.get(unit)
+    if duration_seconds is None:
+        return await message.reply("❌ Invalid format. Use: 1d (days), 3h (hours), or 5m (minutes)")
 
-        if not expiry:
-            return await message.reply("❌ Invalid time unit.")
+    key = generate_custom_key()
 
-        # Generate random key
-        key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
+    # Ensure key is unique
+    existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
+    while existing.data:
+        key = generate_custom_key()
+        existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
 
-        # Insert key into Supabase
-        response = supabase.table("reku_keys").insert({
-            "key": key,
-            "expiry": expiry.isoformat(),
-            "redeemed_by": None,
-            "owner_id": message.from_user.id
-        }).execute()
+    supabase.table("keys_reku").insert({
+        "key": key,
+        "duration_seconds": duration_seconds
+    }).execute()
 
-        if response.error:
-            return await message.reply("❌ Failed to generate key. Please try again later.")
-
-        unit_map = {"h": "hour(s)", "d": "day(s)", "w": "week(s)", "y": "year(s)"}
-        human_duration = f"{value} {unit_map[unit]}"
-        expiry_display = expiry.strftime('%Y-%m-%d %H:%M:%S UTC')
-
-        await message.reply(
-            f"✅ Key generated successfully!\n"
-            f"🔑 Key: `{key}`\n"
-            f"⏳ Duration: {human_duration}\n"
-            f"📅 Expires on: `{expiry_display}`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception as e:
-        print(f"Error in /generate: {e}")
-        await message.reply(f"❌ An unexpected error occurred:\n`{e}`", parse_mode=ParseMode.MARKDOWN)
+    await message.reply(f"✅ Key generated:\n`{key}`\nValid for {duration_str}.", quote=True)
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
-    args = message.text.split()
-    if len(args) < 2:
-        return await message.reply("❌ Usage: /redeem <key>\nExample: /redeem ISAGI-ABC123XYZ")
+    if len(message.command) < 2:
+        return await message.reply("Usage: /redeem <key>")
 
-    key_input = args[1].strip().upper()
-
-    # Check key in Supabase
-    response = supabase.table("reku_keys").select("*").eq("key", key_input).execute()
-    if response.error or not response.data:
-        return await message.reply("❌ Invalid key! Please check and try again.")
-
-    key_info = response.data[0]
-
-    # Check if already redeemed
-    if key_info.get("redeemed_by"):
-        return await message.reply("❌ This key has already been redeemed!")
-
-    # Check if expired
-    try:
-        expiry = datetime.fromisoformat(key_info["expiry"].replace("Z", "+00:00"))
-        if expiry < datetime.now(timezone.utc):
-            return await message.reply("⌛ This key has expired!")
-    except Exception:
-        return await message.reply("⚠️ Key has an invalid expiry format.")
-
-    # Ensure user has no other redeemed key
-    user_keys = supabase.table("reku_keys").select("*").eq("redeemed_by", message.from_user.id).execute()
-    if user_keys.data:
-        existing = user_keys.data[0]
-        return await message.reply(
-            "⚠️ You already have an active subscription!\n\n"
-            f"🔑 Current Key: `{existing['key']}`\n"
-            f"📅 Expires on: `{existing['expiry']}`\n\n"
-            "You can only redeem one key at a time."
-        )
-
-    # Redeem the key
-    update_resp = supabase.table("reku_keys").update({
-        "redeemed_by": message.from_user.id
-    }).eq("key", key_input).execute()
-
-    if update_resp.error:
-        return await message.reply("❌ Failed to redeem key. Please try again later.")
-
-    expiry_display = expiry.strftime('%Y-%m-%d %H:%M:%S UTC')
-
-    await message.reply(
-        f"🎉 Key redeemed successfully!\n\n"
-        f"🔑 Key: `{key_input}`\n"
-        f"📅 Expires on: `{expiry_display}`\n\n"
-        f"Enjoy your premium access! Use /search to start finding accounts.",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-    # Notify admin
-    try:
-        user = await client.get_users(message.from_user.id)
-        username = f"{user.first_name} {user.last_name or ''}".strip()
-        if user.username:
-            username += f" (@{user.username})"
-
-        await client.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                "🔑 Key Redeemed Notification\n"
-                f"├─ Key: `{key_input}`\n"
-                f"├─ User: {username}\n"
-                f"├─ ID: `{message.from_user.id}`\n"
-                f"└─ Expiry: `{expiry_display}`"
-            ),
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception as e:
-        print(f"Failed to notify admin: {e}")
-
-@app.on_message(filters.command("myinfo"))
-async def myinfo(client, message):
+    input_key = message.command[1]
     user_id = message.from_user.id
-    response = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
-    if not response.data:
-        return await message.reply("❌ You do not have an active premium subscription.")
 
-    key_info = response.data[0]
-    expiry = datetime.fromisoformat(key_info["expiry"].replace("Z", "+00:00"))
+    result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
+    data = result.data
+
+    if not data:
+        return await message.reply("❌ Invalid key.")
+
+    if data.get("redeemed"):
+        return await message.reply("❌ This key has already been redeemed.")
+
+    expiry = datetime.utcnow() + timedelta(seconds=data["duration_seconds"])
+
+    supabase.table("keys_reku").update({
+        "redeemed": True,
+        "redeemed_by": user_id,
+        "redeemed_at": datetime.utcnow().isoformat(),
+        "expiry": expiry.isoformat()
+    }).eq("key", input_key).execute()
+
+    readable_duration = str(timedelta(seconds=data["duration_seconds"]))
+
     await message.reply(
-        f"🔑 Your Premium Info:\n"
-        f"• Key: `{key_info['key']}`\n"
-        f"• Expires on: `{expiry}`",
-        parse_mode=ParseMode.MARKDOWN
+        f"🎉 Key redeemed!\nPremium access granted for {readable_duration}."
     )
 
 if __name__ == "__main__":
