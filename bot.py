@@ -228,6 +228,15 @@ async def process_user_content(client, message):
     finally:
         user_state.pop(user_id, None)
         
+# --- Timezone helper ---
+PHT = zoneinfo.ZoneInfo("Asia/Manila")
+
+def utc_to_pht(dt_utc: datetime.datetime) -> datetime.datetime:
+    """Convert naive or UTC datetime to Philippine Time zone aware datetime."""
+    if dt_utc.tzinfo is None:
+        dt_utc = dt_utc.replace(tzinfo=datetime.timezone.utc)
+    return dt_utc.astimezone(PHT)
+
 # --- Duration Parser ---
 def parse_duration(duration_str: str) -> datetime.datetime:
     """
@@ -270,14 +279,15 @@ async def generate_key(client, message):
     key = uuid4().hex
     supabase.table("reku_keys").insert({
         "key": key,
-        "expiry": expiry.isoformat() + "Z",  # Add Z for UTC ISO format consistency
+        "expiry": expiry.isoformat() + "Z",  # UTC ISO format with Z
         "created": datetime.datetime.utcnow().isoformat() + "Z",
         "duration": message.command[1],
         "owner_id": message.from_user.id,
         "redeemed_by": None
     }).execute()
+    expiry_pht = utc_to_pht(expiry)
     await message.reply(
-        f"✅ Key generated:\n<code>{key}</code>\n📅 Expires: {expiry.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"✅ Key generated:\n<code>{key}</code>\n📅 Expires: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}",
         parse_mode=ParseMode.HTML
     )
 
@@ -303,7 +313,11 @@ async def bulk_generate_keys(client, message):
     } for _ in range(count)]
     supabase.table("reku_keys").insert(keys).execute()
     text = "\n".join([f"`{k['key']}`" for k in keys])
-    await message.reply(f"✅ {count} keys generated:\n\n{text}", parse_mode=ParseMode.MARKDOWN)
+    expiry_pht = utc_to_pht(expiry)
+    await message.reply(
+        f"✅ {count} keys generated:\n\n{text}\n\n📅 Expires: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 # --- Command: /redeem ---
 @app.on_message(filters.command("redeem"))
@@ -322,7 +336,10 @@ async def redeem_key(client, message):
     if expiry < datetime.datetime.utcnow():
         return await message.reply("⛔ This key has expired.")
     supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
-    await message.reply("✅ Key redeemed! You now have premium access.")
+    expiry_pht = utc_to_pht(expiry)
+    await message.reply(
+        f"✅ Key redeemed! You now have premium access.\n⏳ Expires: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    )
 
 # --- Run Bot ---
 app.run()
