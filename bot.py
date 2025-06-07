@@ -10,32 +10,26 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from supabase import create_client
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# === Load Configuration from Environment Variables ===
+API_ID = int(os.getenv("API_ID", "0"))
+API_HASH = os.getenv("API_HASH", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
 
-print("ENV loaded -> API_ID:", API_ID, "| BOT_TOKEN starts with:", BOT_TOKEN[:8])
-
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE", "")
 SUPABASE_HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "apikey": SUPABASE_SERVICE_ROLE,
+    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE}",
     "Content-Type": "application/json"
 }
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# === Initialize Supabase Client ===
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
 
-# Fix: Strip quotes Railway adds around env vars with commas
-admin_raw = os.getenv("ADMIN_ID", "5110224851")
-admin_raw = admin_raw.strip('"').strip("'")  # Remove leading/trailing quotes if any
-
-admin_ids = [int(i.strip()) for i in admin_raw.split(",") if i.strip().isdigit()]
-print("Admin IDs loaded:", admin_ids)
-
-ADMIN_ID = admin_ids[0]  # Use first admin ID for notifications
-
-app = Client("reku_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# === Initialize Pyrogram Bot ===
+app = Client("log_search_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 async def check_user_access(user_id: int) -> bool:
     res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
@@ -219,7 +213,7 @@ from datetime import datetime, timedelta, timezone
 import random
 import re
 
-@app.on_message(filters.command("generate") & filters.user(admin_ids))
+@app.on_message(filters.command("generate") & filters.user(ADMIN_ID))
 async def generate_key(client, message):
     print(f"/generate command received from user {message.from_user.id} with text: {message.text}")  # Debug print
     try:
