@@ -33,6 +33,8 @@ admin_raw = admin_raw.strip('"').strip("'")  # Remove leading/trailing quotes if
 admin_ids = [int(i.strip()) for i in admin_raw.split(",") if i.strip().isdigit()]
 print("Admin IDs loaded:", admin_ids)
 
+ADMIN_ID = admin_ids[0]  # Use first admin ID for notifications
+
 app = Client("reku_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 async def check_user_access(user_id: int) -> bool:
@@ -219,61 +221,66 @@ import re
 
 @app.on_message(filters.command("generate") & filters.user(admin_ids))
 async def generate_key(client, message):
-    args = message.text.split()
-    if len(args) < 2:
-        return await message.reply(
-            "❌ Usage: `/generate <duration>`\n"
-            "Examples:\n`/generate 30d` - 30 days\n"
-            "`/generate 1w` - 1 week\n`/generate 12h` - 12 hours",
+    print(f"/generate command received from user {message.from_user.id} with text: {message.text}")  # Debug print
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            return await message.reply(
+                "❌ Usage: `/generate <duration>`\n"
+                "Examples:\n`/generate 30d` - 30 days\n"
+                "`/generate 1w` - 1 week\n`/generate 12h` - 12 hours",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        duration_str = args[1].lower()
+        match = re.fullmatch(r"(\d+)([hdwy])", duration_str)
+        if not match:
+            return await message.reply(
+                "❌ Invalid format. Use:\n- `h` = hours\n- `d` = days\n- `w` = weeks\n- `y` = years\n"
+                "Example: `/generate 7d`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        value, unit = int(match.group(1)), match.group(2)
+        now = datetime.now(timezone.utc)
+        expiry = {
+            "h": now + timedelta(hours=value),
+            "d": now + timedelta(days=value),
+            "w": now + timedelta(weeks=value),
+            "y": now + timedelta(days=365 * value)
+        }.get(unit)
+
+        if not expiry:
+            return await message.reply("❌ Invalid time unit.")
+
+        # Generate random key
+        key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
+
+        # Insert key into Supabase
+        response = supabase.table("reku_keys").insert({
+            "key": key,
+            "expiry": expiry.isoformat(),
+            "redeemed_by": None,
+            "owner_id": message.from_user.id
+        }).execute()
+
+        if response.error:
+            return await message.reply("❌ Failed to generate key. Please try again later.")
+
+        unit_map = {"h": "hour(s)", "d": "day(s)", "w": "week(s)", "y": "year(s)"}
+        human_duration = f"{value} {unit_map[unit]}"
+        expiry_display = expiry.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+        await message.reply(
+            f"✅ Key generated successfully!\n"
+            f"🔑 Key: `{key}`\n"
+            f"⏳ Duration: {human_duration}\n"
+            f"📅 Expires on: `{expiry_display}`",
             parse_mode=ParseMode.MARKDOWN
         )
-
-    duration_str = args[1].lower()
-    match = re.fullmatch(r"(\d+)([hdwy])", duration_str)
-    if not match:
-        return await message.reply(
-            "❌ Invalid format. Use:\n- `h` = hours\n- `d` = days\n- `w` = weeks\n- `y` = years\n"
-            "Example: `/generate 7d`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-    value, unit = int(match.group(1)), match.group(2)
-    now = datetime.now(timezone.utc)
-    expiry = {
-        "h": now + timedelta(hours=value),
-        "d": now + timedelta(days=value),
-        "w": now + timedelta(weeks=value),
-        "y": now + timedelta(days=365 * value)
-    }.get(unit)
-
-    if not expiry:
-        return await message.reply("❌ Invalid time unit.")
-
-    # Generate random key
-    key = "ISAGI-" + "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=10))
-
-    # Insert key into Supabase
-    response = supabase.table("reku_keys").insert({
-        "key": key,
-        "expiry": expiry.isoformat(),
-        "redeemed_by": None,
-        "owner_id": message.from_user.id
-    }).execute()
-
-    if response.error:
-        return await message.reply("❌ Failed to generate key. Please try again later.")
-
-    unit_map = {"h": "hour(s)", "d": "day(s)", "w": "week(s)", "y": "year(s)"}
-    human_duration = f"{value} {unit_map[unit]}"
-    expiry_display = expiry.strftime('%Y-%m-%d %H:%M:%S UTC')
-
-    await message.reply(
-        f"✅ Key generated successfully!\n"
-        f"🔑 Key: `{key}`\n"
-        f"⏳ Duration: {human_duration}\n"
-        f"📅 Expires on: `{expiry_display}`",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    except Exception as e:
+        print(f"Error in /generate: {e}")
+        await message.reply(f"❌ An unexpected error occurred:\n`{e}`", parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
@@ -345,13 +352,29 @@ async def redeem_key(client, message):
                 f"├─ Key: `{key_input}`\n"
                 f"├─ User: {username}\n"
                 f"├─ ID: `{message.from_user.id}`\n"
-                f"└─ Expires: {expiry_display}"
+                f"└─ Expiry: `{expiry_display}`"
             ),
             parse_mode=ParseMode.MARKDOWN
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Failed to notify admin: {e}")
+
+@app.on_message(filters.command("myinfo"))
+async def myinfo(client, message):
+    user_id = message.from_user.id
+    response = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
+    if not response.data:
+        return await message.reply("❌ You do not have an active premium subscription.")
+
+    key_info = response.data[0]
+    expiry = datetime.fromisoformat(key_info["expiry"]).strftime('%Y-%m-%d %H:%M:%S UTC')
+    await message.reply(
+        f"🔑 Your Premium Info:\n"
+        f"• Key: `{key_info['key']}`\n"
+        f"• Expires on: `{expiry}`",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 if __name__ == "__main__":
-    print("Bot starting...")
+    print("Bot is starting...")
     app.run()
