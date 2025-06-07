@@ -408,15 +408,9 @@ async def process_user_content(client, message):
     finally:
         user_state.pop(user_id, None)
 
-@app.on_message(filters.command("ping"))
-async def ping(client: Client, message: Message):
-    print("✅ /ping received")
-    await message.reply("🏓 Pong!")
-
 @app.on_message(filters.command("search"))
 async def search_line(client: Client, message: Message):
-    print("📥 /search received")
-    await message.reply("This is a test search reply!")
+    print("📥 /search command received")
 
     if len(message.command) < 2:
         return await message.reply("❌ Usage: /search <keyword>")
@@ -426,7 +420,11 @@ async def search_line(client: Client, message: Message):
 
     try:
         result = supabase.table("reku").select("*").ilike("line", f"%{keyword}%").execute()
-        print("🧪 Supabase result:", result)
+        
+        # ✅ Add error logging
+        if result.error:
+            print(f"❌ Supabase Error: {result.error}")
+            return await message.reply("❌ Failed to search database. Please try again later.")
 
         rows = result.data or []
         print(f"✅ Rows fetched: {len(rows)}")
@@ -434,7 +432,8 @@ async def search_line(client: Client, message: Message):
         if not rows:
             return await message.reply("🔍 No matching lines found.")
 
-        sample_size = min(len(rows), max(1, random.randint(100, 150)))
+        # ✅ Sample safely
+        sample_size = random.randint(1, min(len(rows), 150))
         selected_rows = random.sample(rows, sample_size)
 
         formatted = []
@@ -450,21 +449,30 @@ async def search_line(client: Client, message: Message):
             )
 
         file_content = "\n\n".join(formatted)
-        filename = f"ISAGI's_{keyword}.txt"
+        filename = f"ISAGI_{keyword}.txt"
 
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(file_content)
-        print(f"📁 File saved: {filename}")
+        # ✅ File writing with error handling
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(file_content)
+            print(f"📁 File saved: {filename}")
+        except Exception as file_error:
+            print("❌ File writing error:", file_error)
+            return await message.reply("❌ Failed to create result file.")
 
-        await message.reply_document(
-            document=filename,
-            caption=f"📄 Results for `{keyword}` ({sample_size} entries)"
-        )
-
-        # os.remove(filename)  # optional
+        # ✅ Send file
+        try:
+            await message.reply_document(
+                document=filename,
+                caption=f"📄 Results for `{keyword}` ({sample_size} entries)"
+            )
+        except Exception as send_error:
+            print("❌ Error sending file:", send_error)
+            return await message.reply("❌ Failed to send the file. It might be too large.")
 
     except Exception as e:
-        print("❌ Error in /search:", e)
-        await message.reply("❌ An error occurred during search.")
+        import traceback
+        traceback.print_exc()
+        await message.reply(f"❌ An error occurred during search: {e}")
 
 app.run()
