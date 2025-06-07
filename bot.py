@@ -414,37 +414,35 @@ async def search_line(client: Client, message: Message):
         return await message.reply("❌ Usage: /search <keyword>", quote=True)
 
     keyword = message.command[1].lower()
+    print(f"🔍 Running search for keyword: {keyword}")
 
     try:
-        # Fetch full rows
         result = supabase.table("reku") \
             .select("*") \
             .ilike("line", f"%{keyword}%") \
             .execute()
 
-        rows = result.data
+        rows = result.data or []
+        print(f"✅ Total matches: {len(rows)}")
 
         if not rows:
             return await message.reply("🔍 No matching lines found.", quote=True)
 
-        # Randomly select 100–150 lines
-        sample_size = min(len(rows), random.randint(100, 150))
+        sample_size = min(len(rows), max(1, random.randint(100, 150)))
         selected_rows = random.sample(rows, sample_size)
 
-        # Format text for each entry
         formatted_entries = []
         for row in selected_rows:
             formatted_entries.append(
-                f"🆔 ID: {row['id']}\n"
-                f"📁 Category: {row['category']}\n"
-                f"👤 Username: {row['username']}\n"
-                f"🔑 Pass: {row['pass']}\n"
-                f"📝 Line: {row['line']}\n"
-                f"📅 Created At: {row['created_at']}\n"
+                f"🆔 ID: `{row.get('id', 'N/A')}`\n"
+                f"📁 Category: `{row.get('category', 'N/A')}`\n"
+                f"👤 Username: `{row.get('username', 'N/A')}`\n"
+                f"🔑 Pass: `{row.get('pass', 'N/A')}`\n"
+                f"📝 Line: `{row.get('line', 'N/A')}`\n"
+                f"📅 Created At: `{row.get('created_at', 'N/A')}`\n"
                 "───────────────"
             )
 
-        # Create text content and file
         file_content = "\n\n".join(formatted_entries)
         filename = f"ISAGI's_{keyword}.txt"
 
@@ -453,12 +451,15 @@ async def search_line(client: Client, message: Message):
 
         await message.reply_document(
             document=filename,
-            caption=f"📄 Search results for `{keyword}` ({sample_size} entries)",
+            caption=f"📄 Search results for `{keyword}` ({len(selected_rows)} entries)",
             quote=True
         )
 
+        os.remove(filename)
+
     except Exception as e:
-        print("Error in /search:", e)
-        await message.reply("❌ An error occurred while searching.", quote=True)
+        print("❌ Error during /search command")
+        traceback.print_exc()
+        await message.reply("❌ An error occurred while processing the search.", quote=True)
 
 app.run()
