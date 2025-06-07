@@ -125,10 +125,15 @@ async def redeem_key(client, message):
     user_id = message.from_user.id
 
     # Check if user has already redeemed a key
-    user_keys = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).execute()
-    if user_keys.data:
-        return await message.reply("❌ You’ve already redeemed a key. Only one redemption is allowed per user.")
+    try:
+        user_keys = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).execute()
+        if user_keys.data:
+            return await message.reply("❌ You’ve already redeemed a key. Only one redemption is allowed per user.")
+    except Exception as e:
+        print(f"[!] Error checking user keys: {e}")
+        return await message.reply("❌ Failed to check your key status. Please try again.")
 
+    # Lookup the input key
     try:
         result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
     except Exception as e:
@@ -142,14 +147,19 @@ async def redeem_key(client, message):
     if data.get("redeemed"):
         return await message.reply("❌ This key has already been redeemed.")
 
-    expiry = datetime.now(timezone.utc) + timedelta(seconds=data["duration_seconds"])
+    # Calculate expiry and convert to Philippine time
+    expiry_utc = datetime.now(timezone.utc) + timedelta(seconds=data["duration_seconds"])
+    ph_tz = pytz_timezone("Asia/Manila")
+    expiry_ph = expiry_utc.astimezone(ph_tz)
+    expiry_str = expiry_ph.strftime("%Y-%m-%d %H:%M:%S %Z%z")
 
+    # Update database to mark key as redeemed
     try:
         update_res = supabase.table("keys_reku").update({
             "redeemed": True,
             "redeemed_by": user_id,
             "redeemed_at": datetime.now(timezone.utc).isoformat(),
-            "expiry": expiry.isoformat()
+            "expiry": expiry_utc.isoformat()
         }).eq("key", input_key).execute()
 
         if not update_res.data:
@@ -159,8 +169,17 @@ async def redeem_key(client, message):
         print(f"[!] Update error: {e}")
         return await message.reply("❌ An error occurred while redeeming the key.")
 
+    # Format readable duration
     readable_duration = str(timedelta(seconds=data["duration_seconds"]))
-    await message.reply(f"🎉 Key redeemed!\nPremium access granted for {readable_duration}.")
+
+    await message.reply(
+        f"🎉 Key redeemed successfully!\n\n"
+        f"🔑 Key: `{input_key}`\n"
+        f"⏳ Duration: {readable_duration}\n"
+        f"📅 Expires on: `{expiry_str}`\n\n"
+        f"Enjoy your premium access! Use /search to start finding accounts.",
+        parse_mode="Markdown"
+    )
 
 @app.on_message(filters.command("myinfo"))
 async def myinfo(client, message):
@@ -197,7 +216,7 @@ async def remove_key(client, message):
         return await message.reply("❌ You are not authorized to use this command.")
 
     if len(message.command) < 2:
-        return await message.reply("Usage: /remove <key>")
+        return await message.reply("Usage: /remove -key-")
 
     key_to_remove = message.command[1]
 
