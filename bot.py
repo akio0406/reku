@@ -2,9 +2,10 @@ import re
 import random
 import string
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone  # keep this for datetime timezone
 
-from pytz import timezone
+from pytz import timezone as pytz_timezone          # renamed to avoid conflict
+
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
