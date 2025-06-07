@@ -268,7 +268,7 @@ async def generate_key(client, message: Message):
         expiry = parse_duration(duration_str)
         now = datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
 
-        key = uuid4().hex
+        key = "ISAGI-" + ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=10))
         data = {
             "key": key,
             "expiry": expiry.isoformat() + "Z",
@@ -309,7 +309,7 @@ async def bulkgenerate_keys(client, message: Message):
         keys = []
         records = []
         for _ in range(amount):
-            key = uuid4().hex
+            key = "ISAGI-" + ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=10))
             keys.append(key)
             records.append({
                 "key": key,
@@ -365,7 +365,12 @@ async def redeem_key(client, message: Message):
             return await message.reply("❌ This key is expired.")
 
         # Redeem
-        update = supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key_input).execute()
+        redeemed_at = datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
+        update = supabase.table("reku_keys").update({
+            "redeemed_by": user_id,
+            "redeemed_at": redeemed_at
+        }).eq("key", key_input).execute()
+
         if update.error:
             return await message.reply(f"❌ Redeem failed: {update.error.message}")
 
