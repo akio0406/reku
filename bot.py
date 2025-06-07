@@ -316,6 +316,4 @@ async def redeem_key(client, message):
         f"🎉 Key redeemed!\nPremium access granted for {readable_duration}."
     )
 
-if __name__ == "__main__":
-    print("Bot is starting...")
-    app.run()
+app.run()
