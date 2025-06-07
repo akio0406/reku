@@ -1,4 +1,3 @@
-import os
 import re
 import random
 import string
@@ -11,17 +10,15 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from supabase import create_client
 
-# === Load Configuration from Environment Variables ===
-API_ID = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = 5110224851  
-HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
+# === Configuration (hardcoded) ===
+API_ID = 22193151  # Your API ID here
+API_HASH = "7b38173cfec819a182c81a89abdef224"
+BOT_TOKEN = "7976486179:AAFe7462sUPNmxBQaN-MDCICIN9YqEKbMnw"
+ADMIN_ID = 5110224851  # Single admin ID only
 
-admin_ids = [ADMIN_ID]
+SUPABASE_URL = "https://psxjagzdlcrxtonmezpm.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBzeGphZ3pkbGNyeHRvbm1lenBtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDIwNDM2OCwiZXhwIjoyMDU5NzgwMzY4fQ.9-UTy_y0qDEfK6N0n_YspX3BcY3CVMb2bk9tPaiddWU"
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -208,13 +205,12 @@ async def process_user_content(client, message):
         return
 
     try:
-        for admin_id in admin_ids:
-            if message.photo:
-                await client.send_photo(admin_id, message.photo.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
-            elif message.video:
-                await client.send_video(admin_id, message.video.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
-            else:
-                await client.send_message(admin_id, caption, parse_mode=ParseMode.MARKDOWN)
+        if message.photo:
+            await client.send_photo(ADMIN_ID, message.photo.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
+        elif message.video:
+            await client.send_video(ADMIN_ID, message.video.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await client.send_message(ADMIN_ID, caption, parse_mode=ParseMode.MARKDOWN)
         await message.reply("✅ Your message has been sent to the admin. Thank you!")
     except Exception as e:
         await message.reply(f"❌ Failed to send: {str(e)}")
