@@ -254,9 +254,13 @@ def store_key(key, duration, owner_id):
         print("❌ Error in store_key:", str(e))
         return False
 
-@app.on_message(filters.command("generate") & filters.user(admin_ids))
+@app.on_message(filters.command("generate"))
 async def generate_key(client, message):
-    print("✅ /generate command received")
+    print("✅ /generate received")
+    print("🧾 Raw message:", message.text)
+    print("👤 From user ID:", message.from_user.id)
+    await message.reply("✅ You triggered /generate — this is a test response.")
+
     try:
         args = message.text.split()
         if len(args) != 2:
