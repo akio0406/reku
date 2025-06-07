@@ -78,7 +78,7 @@ async def generate_key(client, message):
     duration_seconds = parse_duration(duration_str)
 
     if duration_seconds is None:
-        return await message.reply("❌ Invalid format. Use: 1d (days), 3h (hours), or 5m (minutes)")
+        return await message.reply("❌ Invalid format. Use: 1d (days), 3h, or 5m")
 
     key = generate_custom_key()
     attempts = 0
@@ -99,8 +99,8 @@ async def generate_key(client, message):
         "duration_seconds": duration_seconds
     }).execute()
 
-    if insert_res.error:
-        print(f"Insertion failed: {insert_res.error.message}")
+    if not insert_res.data:
+        print(f"Insertion failed: {insert_res.model_dump()}")
         return await message.reply("❌ Failed to insert the key into the database.")
 
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
