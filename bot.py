@@ -409,30 +409,56 @@ async def process_user_content(client, message):
         user_state.pop(user_id, None)
 
 @app.on_message(filters.command("search"))
-async def search(client, message):
+async def search_line(client: Client, message: Message):
     if len(message.command) < 2:
-        return await message.reply("Usage: /search <keyword>")
+        return await message.reply("❌ Usage: /search <keyword>", quote=True)
 
     keyword = message.command[1].lower()
 
     try:
-        # Fetch all rows from the 'reku' table
-        rows = supabase.table("reku").select("lines").execute().data
+        # Fetch full rows
+        result = supabase.table("reku") \
+            .select("*") \
+            .ilike("line", f"%{keyword}%") \
+            .execute()
 
-        # Filter rows where 'lines' contains the keyword
-        matching_rows = [
-            row for row in rows if keyword in row["lines"].lower()
-        ]
+        rows = result.data
 
-        if matching_rows:
-            # Select a random matching row
-            import random
-            random_row = random.choice(matching_rows)
-            await message.reply(f"Found a match: {random_row['lines']}")
-        else:
-            await message.reply("No matches found.")
+        if not rows:
+            return await message.reply("🔍 No matching lines found.", quote=True)
+
+        # Randomly select 100–150 lines
+        sample_size = min(len(rows), random.randint(100, 150))
+        selected_rows = random.sample(rows, sample_size)
+
+        # Format text for each entry
+        formatted_entries = []
+        for row in selected_rows:
+            formatted_entries.append(
+                f"🆔 ID: {row['id']}\n"
+                f"📁 Category: {row['category']}\n"
+                f"👤 Username: {row['username']}\n"
+                f"🔑 Pass: {row['pass']}\n"
+                f"📝 Line: {row['line']}\n"
+                f"📅 Created At: {row['created_at']}\n"
+                "───────────────"
+            )
+
+        # Create text content and file
+        file_content = "\n\n".join(formatted_entries)
+        filename = f"ISAGI's_{keyword}.txt"
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(file_content)
+
+        await message.reply_document(
+            document=filename,
+            caption=f"📄 Search results for `{keyword}` ({sample_size} entries)",
+            quote=True
+        )
+
     except Exception as e:
-        await message.reply("An error occurred while searching.")
-        print(f"Error: {e}")
+        print("Error in /search:", e)
+        await message.reply("❌ An error occurred while searching.", quote=True)
 
 app.run()
