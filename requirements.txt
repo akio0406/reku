@@ -2,5 +2,6 @@ pyrogram==2.0.106
 tgcrypto
 pytz
 requests
+httpx
 supabase==1.0.3
 pycryptodome
