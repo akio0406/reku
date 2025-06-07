@@ -124,6 +124,11 @@ async def redeem_key(client, message):
     input_key = message.command[1]
     user_id = message.from_user.id
 
+    # Check if user has already redeemed a key
+    user_keys = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).execute()
+    if user_keys.data:
+        return await message.reply("❌ You’ve already redeemed a key. Only one redemption is allowed per user.")
+
     try:
         result = supabase.table("keys_reku").select("*").eq("key", input_key).single().execute()
     except Exception as e:
@@ -131,7 +136,6 @@ async def redeem_key(client, message):
         return await message.reply("❌ An error occurred while checking the key.")
 
     data = result.data
-
     if not data:
         return await message.reply("❌ Invalid key.")
 
@@ -156,10 +160,56 @@ async def redeem_key(client, message):
         return await message.reply("❌ An error occurred while redeeming the key.")
 
     readable_duration = str(timedelta(seconds=data["duration_seconds"]))
+    await message.reply(f"🎉 Key redeemed!\nPremium access granted for {readable_duration}.")
 
-    await message.reply(
-        f"🎉 Key redeemed!\nPremium access granted for {readable_duration}."
-    )
+@app.on_message(filters.command("myinfo"))
+async def myinfo(client, message):
+    user_id = message.from_user.id
+
+    try:
+        result = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).single().execute()
+        key_info = result.data
+
+        if not key_info:
+            return await message.reply("❌ No redeemed key found for your account.")
+
+        expiry = datetime.fromisoformat(key_info["expiry"].replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+
+        status = "✅ ACTIVE" if expiry > now else "❌ EXPIRED"
+        readable_expiry = expiry.astimezone(pytz_timezone("Asia/Manila")).strftime("%Y-%m-%d %H:%M:%S")
+
+        await message.reply(
+            f"🔐 <b>Subscription Info</b>\n"
+            f"• Key: <code>{key_info['key']}</code>\n"
+            f"• Status: {status}\n"
+            f"• Expires on: {readable_expiry}",
+            parse_mode=ParseMode.HTML
+        )
+
+    except Exception as e:
+        print(f"Error in /myinfo: {e}")
+        await message.reply("❌ Could not retrieve your info. Try again later.")
+
+@app.on_message(filters.command("remove"))
+async def remove_key(client, message):
+    if message.from_user.id != ADMIN_ID:
+        return await message.reply("❌ You are not authorized to use this command.")
+
+    if len(message.command) < 2:
+        return await message.reply("Usage: /remove <key>")
+
+    key_to_remove = message.command[1]
+
+    try:
+        delete_res = supabase.table("keys_reku").delete().eq("key", key_to_remove).execute()
+        if delete_res.data:
+            await message.reply(f"🗑️ Key `{key_to_remove}` has been removed.", parse_mode=ParseMode.MARKDOWN)
+        else:
+            await message.reply("❌ Key not found or already removed.")
+    except Exception as e:
+        print(f"Error removing key: {e}")
+        await message.reply("❌ Failed to remove key.")
 
 @app.on_message(filters.command("start"))
 async def start(client, message):
