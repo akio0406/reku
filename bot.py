@@ -38,40 +38,56 @@ async def check_user_access(user_id: int) -> bool:
     return False
 
 # --- Command: /start ---
+# --- Command: /start ---
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    is_premium = await check_user_access(message.from_user.id)
-    if is_premium:
-        caption = (
-            "🛡️ <b>PREMIUM TXT SEARCHER</b> 🛡️\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-            "🎯 <b>Account Status:</b> ACTIVE\n"
-            "🔓 <b>Access Level:</b> PREMIUM\n\n"
-            "📌 Available commands:\n"
-            "• /search - Find accounts\n"
-            "• /dice - Get random reward\n"
-            "• /help - Show all commands"
-        )
-        keyboard = None
-    else:
-        caption = (
-            "🔎 <b>PREMIUM TXT GENERATOR</b> 🔍\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-            "Access premium accounts database with verified credentials\n\n"
-            "🚀 <b>Get Started:</b>\n"
-            "1. Purchase access key from seller\n"
-            "2. Redeem using /redeem <key>\n\n"
-            "💎 <b>Premium Features:</b>\n"
-            "- Unlimited searches\n"
-            "- Premium and fresh results\n"
-            "- Exclusive categories"
-        )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 GET ACCESS KEY", url="https://t.me/Rikushittt")],
-            [InlineKeyboardButton("❓ REDEEM GUIDE", callback_data="redeem_help")]
-        ])
+    try:
+        user_id = message.from_user.id
+        res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
+        is_premium = False
+        if res.data:
+            try:
+                expiry_str = res.data[0]["expiry"].replace("Z", "+00:00")
+                expiry = datetime.datetime.fromisoformat(expiry_str)
+                is_premium = expiry > datetime.datetime.utcnow()
+            except Exception as e:
+                print(f"Expiry parsing error: {e}")
 
-    await message.reply_text(caption, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+        if is_premium:
+            caption = (
+                "🛡️ <b>PREMIUM TXT SEARCHER</b> 🛡️\n"
+                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+                "🎯 <b>Account Status:</b> ACTIVE\n"
+                "🔓 <b>Access Level:</b> PREMIUM\n\n"
+                "📌 Available commands:\n"
+                "• /search - Find accounts\n"
+                "• /dice - Get random reward\n"
+                "• /help - Show all commands"
+            )
+            keyboard = None
+        else:
+            caption = (
+                "🔎 <b>PREMIUM TXT GENERATOR</b> 🔍\n"
+                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+                "Access premium accounts database with verified credentials\n\n"
+                "🚀 <b>Get Started:</b>\n"
+                "1. Purchase access key from seller\n"
+                "2. Redeem using /redeem <key>\n\n"
+                "💎 <b>Premium Features:</b>\n"
+                "- Unlimited searches\n"
+                "- Premium and fresh results\n"
+                "- Exclusive categories"
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 GET ACCESS KEY", url="https://t.me/Rikushittt")],
+                [InlineKeyboardButton("❓ REDEEM GUIDE", callback_data="redeem_help")]
+            ])
+
+        await message.reply_text(caption, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+
+    except Exception as e:
+        await message.reply_text("❌ An error occurred in /start.")
+        print(f"Error in /start: {e}")
 
 # --- Command: /help ---
 @app.on_message(filters.command("help"))
@@ -96,6 +112,122 @@ async def help_command(client, message):
     )
     await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
+# --- User Send ---
+
+user_state = {}
+
+@app.on_message(filters.command("send"))
+async def send_command(client, message):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📣 Feedback", callback_data="send_feedback"),
+         InlineKeyboardButton("💳 Payment", callback_data="send_payment")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_action")]
+    ])
+
+    await message.reply("📨 What would you like to send?", reply_markup=keyboard)
+
+@app.on_callback_query()
+async def handle_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    data = callback_query.data
+
+    if data == "send_feedback":
+        user_state[user_id] = {"action": "awaiting_feedback"}
+        await callback_query.message.edit_text(
+            "📣 Please send your feedback (text, photo, or video).\n\n"
+            "You can include:\n"
+            "- Bug reports\n"
+            "- Feature requests\n"
+            "- General feedback\n\n"
+            "Type /cancel to abort."
+        )
+    elif data == "send_payment":
+        user_state[user_id] = {"action": "awaiting_payment_proof"}
+        await callback_query.message.edit_text(
+            "💳 <b>Payment Process</b> 💳\n\n"
+            "1. Send your payment proof (screenshot/photo)\n"
+            "2. Include amount paid in the caption\n"
+            "3. Your payment will be verified within 24 hours\n\n"
+            "📝 Example caption:\n"
+            "<code>Payment for Premium Access - ₱200</code>\n\n"
+            "Type /cancel to abort.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    elif data == "cancel_action":
+        user_state.pop(user_id, None)
+        await callback_query.message.edit_text("❌ Action cancelled.")
+
+@app.on_message(filters.command("cancel"))
+async def cancel_command(client, message):
+    user_state.pop(message.from_user.id, None)
+    await message.reply("❌ Action cancelled.")
+
+@app.on_message((filters.text | filters.photo | filters.video))
+async def process_user_content(client, message):
+    user_id = message.from_user.id
+    state = user_state.get(user_id)
+    if not state:
+        return
+
+    action = state.get("action")
+    content = message.text or message.caption or "[No message text]"
+
+    try:
+        user = await client.get_users(user_id)
+        user_info = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
+        user_info += f" (@{user.username})" if user.username else ""
+    except:
+        user_info = f"User ID: {user_id}"
+
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    if action == "awaiting_feedback":
+        caption = (
+            f"📬 *New Feedback*\n\n"
+            f"👤 *From:* {user_info}\n"
+            f"🆔 *User ID:* {user_id}\n"
+            f"📅 *Date:* {now}\n\n"
+            f"💬 *Feedback:*\n{content}"
+        )
+    elif action == "awaiting_payment_proof":
+        caption = (
+            f"💰 *New Payment Proof*\n\n"
+            f"👤 *From:* {user_info}\n"
+            f"🆔 *User ID:* {user_id}\n"
+            f"📅 *Date:* {now}\n\n"
+            f"💬 *Caption:*\n{content}"
+        )
+    else:
+        return
+
+    try:
+        for admin_id in admin_ids:
+            if message.photo:
+                await client.send_photo(
+                    chat_id=admin_id,
+                    photo=message.photo.file_id,
+                    caption=caption,
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
+            elif message.video:
+                await client.send_video(
+                    chat_id=admin_id,
+                    video=message.video.file_id,
+                    caption=caption,
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
+            else:
+                await client.send_message(
+                    chat_id=admin_id,
+                    text=caption,
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
+        await message.reply("✅ Your message has been sent to the admin. Thank you!")
+    except Exception as e:
+        await message.reply(f"❌ Failed to send: {str(e)}")
+    finally:
+        user_state.pop(user_id, None)
+        
 # --- Duration Parser ---
 def parse_duration(duration_str: str) -> datetime.datetime:
     amount = int(duration_str[:-1])
