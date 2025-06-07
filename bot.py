@@ -408,4 +408,31 @@ async def process_user_content(client, message):
     finally:
         user_state.pop(user_id, None)
 
+@app.on_message(filters.command("search"))
+async def search(client, message):
+    if len(message.command) < 2:
+        return await message.reply("Usage: /search <keyword>")
+
+    keyword = message.command[1].lower()
+
+    try:
+        # Fetch all rows from the 'reku' table
+        rows = supabase.table("reku").select("lines").execute().data
+
+        # Filter rows where 'lines' contains the keyword
+        matching_rows = [
+            row for row in rows if keyword in row["lines"].lower()
+        ]
+
+        if matching_rows:
+            # Select a random matching row
+            import random
+            random_row = random.choice(matching_rows)
+            await message.reply(f"Found a match: {random_row['lines']}")
+        else:
+            await message.reply("No matches found.")
+    except Exception as e:
+        await message.reply("An error occurred while searching.")
+        print(f"Error: {e}")
+
 app.run()
