@@ -4,6 +4,7 @@ import string
 import logging
 from datetime import datetime, timedelta, timezone
 
+from pytz import timezone
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -102,6 +103,19 @@ async def generate_key(client, message):
     if not insert_res.data:
         print(f"Insertion failed: {insert_res.model_dump()}")
         return await message.reply("❌ Failed to insert the key into the database.")
+
+    # Convert expiry to Philippine time
+    ph_tz = timezone("Asia/Manila")
+    expires_at_utc = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+    expires_at_ph = expires_at_utc.astimezone(ph_tz)
+
+    await message.reply(
+        f"✅ Key generated successfully!\n"
+        f"🔑 Key: `{key}`\n"
+        f"⏳ Duration: {duration_str}\n"
+        f"📅 Expires on: `{expires_at_ph.strftime('%Y-%m-%d %H:%M:%S')} PH Time`",
+        quote=True
+    )
 
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
 
