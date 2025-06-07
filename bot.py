@@ -34,8 +34,8 @@ SUPABASE_HEADERS = {
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Admin IDs ---
-admin_ids = [int(i.strip()) for i in os.getenv("ADMIN_ID", "5110224851").split(",") if i.strip().isdigit()]
-print("Admin IDs:", admin_ids)
+admin_ids = [5110224851, 6649502398]
+print("Admin IDs loaded:", admin_ids)
 
 # --- Pyrogram App ---
 app = Client("reku_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -239,21 +239,24 @@ async def process_user_content(client, message):
         
 # --- Timezone helper ---
 def store_key(key, duration, owner_id):
-    expiry_time = (datetime.now(timezone.utc) + duration).isoformat()
+    try:
+        expiry_time = (datetime.now(timezone.utc) + duration).isoformat()
+        data = {
+            "key": key,
+            "expiry": expiry_time,
+            "owner_id": owner_id
+        }
 
-    data = {
-        "key": key,
-        "expiry": expiry_time,
-        "owner_id": owner_id
-    }
-
-    response = requests.post(f"{SUPABASE_URL}/rest/v1/reku_keys", headers=SUPABASE_HEADERS, json=data)
-    print("🔍 Supabase Response:", response.status_code, response.text)
-
-    return response.status_code == 201
+        response = requests.post(f"{SUPABASE_URL}/rest/v1/reku_keys", headers=SUPABASE_HEADERS, json=data)
+        print("🔍 Supabase Response:", response.status_code, response.text)
+        return response.status_code == 201
+    except Exception as e:
+        print("❌ Error in store_key:", str(e))
+        return False
 
 @app.on_message(filters.command("generate") & filters.user(admin_ids))
 async def generate_key(client, message):
+    print("✅ /generate command received")
     try:
         args = message.text.split()
         if len(args) != 2:
