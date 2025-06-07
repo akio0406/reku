@@ -36,7 +36,7 @@ async def check_user_access(user_id: int) -> bool:
     res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
     if res.data:
         expiry = datetime.datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-        return expiry > datetime.datetime.utcnow()
+        return expiry > datetime.datetime.now(datetime.timezone.utc)
     return False
 
 # --- Command: /start ---
@@ -48,9 +48,9 @@ async def start(client, message):
         is_premium = False
         if res.data:
             try:
-                expiry_str = res.data[0]["expiry"].replace("Z", "+00:00")
-                expiry = datetime.datetime.fromisoformat(expiry_str)
-                is_premium = expiry > datetime.datetime.utcnow()
+                expiry = datetime.datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
+                now_utc = datetime.datetime.now(datetime.timezone.utc)
+                is_premium = expiry > now_utc
             except Exception as e:
                 print(f"Expiry parsing error: {e}")
 
@@ -254,7 +254,7 @@ def parse_duration(duration_str: str) -> datetime.datetime:
     except ValueError:
         raise ValueError("Duration must start with a number, e.g. 10d, 5h")
     unit = duration_str[-1].lower()
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     if unit == 'm':
         delta = datetime.timedelta(minutes=amount)
     elif unit == 'h':
@@ -281,7 +281,7 @@ async def generate_key(client, message: Message):
         result = supabase.table("reku_keys").insert({
             "key": key,
             "expiry": expiry.isoformat() + "Z",
-            "created": datetime.datetime.utcnow().isoformat() + "Z",
+            "created": datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z",
             "duration": duration_str,
             "owner_id": message.from_user.id,
             "redeemed_by": None
@@ -322,7 +322,7 @@ async def bulkgenerate_keys(client, message: Message):
         expiry = parse_duration(duration_str)
         keys = []
         records = []
-        now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
 
         for _ in range(amount):
             key = uuid4().hex
@@ -386,7 +386,7 @@ async def redeem_key(client, message: Message):
             return
         
         expiry = datetime.datetime.fromisoformat(key_record["expiry"].replace("Z", "+00:00"))
-        if expiry < datetime.datetime.utcnow():
+        if expiry < datetime.datetime.now(datetime.timezone.utc):
             await message.reply("❌ This key is expired.")
             return
 
