@@ -1,6 +1,7 @@
 import os
 import re
 import random
+import string
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -35,10 +36,9 @@ app = Client("log_search_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_T
 
 def check_user_access(user_id: int) -> bool:
     try:
-        res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
+        res = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).execute()
         if res.error or not res.data:
             return False
-        # Assuming user can have multiple keys, check if any valid
         now_utc = datetime.now(timezone.utc)
         for key in res.data:
             expiry = datetime.fromisoformat(key["expiry"].replace("Z", "+00:00"))
@@ -53,7 +53,7 @@ def check_user_access(user_id: int) -> bool:
 async def start(client, message):
     try:
         user_id = message.from_user.id
-        res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
+        res = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).execute()
 
         is_premium = False
         if res.data:
@@ -221,10 +221,6 @@ async def process_user_content(client, message):
     finally:
         user_state.pop(user_id, None)
 
-import re
-import random
-import string
-
 def generate_custom_key():
     chars = string.ascii_uppercase + string.digits
     return "REKU-" + ''.join(random.choices(chars, k=10))
@@ -245,8 +241,11 @@ def parse_duration(duration_str: str) -> int:
     else:
         return None
 
-@app.on_message(filters.command("generate") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("generate"))
 async def generate_key(client, message):
+    if message.from_user.id != ADMIN_ID:
+        return await message.reply("❌ You are not authorized to use this command.")
+
     if len(message.command) < 2:
         return await message.reply("Usage: /generate <duration> (e.g. 1d, 3h, 5m)")
 
@@ -257,19 +256,33 @@ async def generate_key(client, message):
         return await message.reply("❌ Invalid format. Use: 1d (days), 3h (hours), or 5m (minutes)")
 
     key = generate_custom_key()
-
-    # Ensure key is unique
+    attempts = 0
     existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
-    while existing.data:
+
+    while existing.data and attempts < 5:
         key = generate_custom_key()
         existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
+        attempts += 1
 
-    supabase.table("keys_reku").insert({
+    if existing.data:
+        return await message.reply("❌ Failed to generate a unique key. Try again.")
+
+    insert_res = supabase.table("keys_reku").insert({
         "key": key,
         "duration_seconds": duration_seconds
     }).execute()
 
-    await message.reply(f"✅ Key generated:\n`{key}`\nValid for {duration_str}.", quote=True)
+    if insert_res.error:
+        print(f"[ERROR] Supabase insert error: {insert_res.error}")
+        return await message.reply("❌ Failed to save key to database.")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+
+    await message.reply(
+        f"✅ Key generated:\n`{key}`\n"
+        f"Valid for {duration_str} (until {expires_at.strftime('%Y-%m-%d %H:%M:%S UTC')})",
+        quote=True
+    )
 
 @app.on_message(filters.command("redeem"))
 async def redeem_key(client, message):
@@ -288,12 +301,12 @@ async def redeem_key(client, message):
     if data.get("redeemed"):
         return await message.reply("❌ This key has already been redeemed.")
 
-    expiry = datetime.utcnow() + timedelta(seconds=data["duration_seconds"])
+    expiry = datetime.now(timezone.utc) + timedelta(seconds=data["duration_seconds"])
 
     supabase.table("keys_reku").update({
         "redeemed": True,
         "redeemed_by": user_id,
-        "redeemed_at": datetime.utcnow().isoformat(),
+        "redeemed_at": datetime.now(timezone.utc).isoformat(),
         "expiry": expiry.isoformat()
     }).eq("key", input_key).execute()
 
