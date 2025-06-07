@@ -230,37 +230,56 @@ async def process_user_content(client, message):
         
 # --- Duration Parser ---
 def parse_duration(duration_str: str) -> datetime.datetime:
-    amount = int(duration_str[:-1])
-    unit = duration_str[-1]
-    delta = {
-        "h": datetime.timedelta(hours=amount),
-        "d": datetime.timedelta(days=amount),
-        "w": datetime.timedelta(weeks=amount),
-        "m": datetime.timedelta(days=30 * amount),
-        "y": datetime.timedelta(days=365 * amount)
-    }.get(unit)
-    if delta is None:
-        raise ValueError("Invalid duration unit. Use h/d/w/m/y.")
+    """
+    Parses duration string and returns expiration datetime in UTC.
+    Supported units:
+    m = minutes
+    h = hours
+    d = days
+    y = years (365 days)
+    """
+    if len(duration_str) < 2:
+        raise ValueError("Invalid duration format.")
+    try:
+        amount = int(duration_str[:-1])
+    except ValueError:
+        raise ValueError("Duration must start with a number, e.g. 10d, 3h")
+
+    unit = duration_str[-1].lower()
+    if unit == "m":
+        delta = datetime.timedelta(minutes=amount)
+    elif unit == "h":
+        delta = datetime.timedelta(hours=amount)
+    elif unit == "d":
+        delta = datetime.timedelta(days=amount)
+    elif unit == "y":
+        delta = datetime.timedelta(days=365 * amount)
+    else:
+        raise ValueError("Invalid duration unit. Use m/h/d/y.")
     return datetime.datetime.utcnow() + delta
 
 # --- Command: /generate ---
 @app.on_message(filters.command("generate") & filters.user(admin_ids))
 async def generate_key(client, message):
     if len(message.command) < 2:
-        return await message.reply("Usage: /generate <duration> (e.g. 1d, 3w)")
+        return await message.reply("Usage: /generate <duration> (e.g. 1d, 3h)")
     try:
         expiry = parse_duration(message.command[1])
     except Exception as e:
-        return await message.reply(str(e))
+        return await message.reply(f"Error: {e}")
     key = uuid4().hex
     supabase.table("reku_keys").insert({
         "key": key,
-        "expiry": expiry.isoformat(),
-        "created": datetime.datetime.utcnow().isoformat(),
+        "expiry": expiry.isoformat() + "Z",  # Add Z for UTC ISO format consistency
+        "created": datetime.datetime.utcnow().isoformat() + "Z",
         "duration": message.command[1],
-        "owner_id": message.from_user.id
+        "owner_id": message.from_user.id,
+        "redeemed_by": None
     }).execute()
-    await message.reply(f"✅ Key generated:\n<code>{key}</code>\n📅 Expires: {expiry}", parse_mode=ParseMode.HTML)
+    await message.reply(
+        f"✅ Key generated:\n<code>{key}</code>\n📅 Expires: {expiry.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        parse_mode=ParseMode.HTML
+    )
 
 # --- Command: /bulkgenerate ---
 @app.on_message(filters.command("bulkgenerate") & filters.user(admin_ids))
@@ -272,14 +291,15 @@ async def bulk_generate_keys(client, message):
         count = int(message.command[2])
         expiry = parse_duration(duration_str)
     except Exception as e:
-        return await message.reply(str(e))
-    now = datetime.datetime.utcnow().isoformat()
+        return await message.reply(f"Error: {e}")
+    now = datetime.datetime.utcnow().isoformat() + "Z"
     keys = [{
         "key": uuid4().hex,
-        "expiry": expiry.isoformat(),
+        "expiry": expiry.isoformat() + "Z",
         "created": now,
         "duration": duration_str,
-        "owner_id": message.from_user.id
+        "owner_id": message.from_user.id,
+        "redeemed_by": None
     } for _ in range(count)]
     supabase.table("reku_keys").insert(keys).execute()
     text = "\n".join([f"`{k['key']}`" for k in keys])
@@ -296,7 +316,7 @@ async def redeem_key(client, message):
     if not res.data:
         return await message.reply("❌ Invalid key.")
     record = res.data[0]
-    if record["redeemed_by"]:
+    if record["redeemed_by"] is not None:
         return await message.reply("⚠️ This key has already been used.")
     expiry = datetime.datetime.fromisoformat(record["expiry"].replace("Z", "+00:00"))
     if expiry < datetime.datetime.utcnow():
