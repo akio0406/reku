@@ -17,6 +17,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
 
+admin_ids = [ADMIN_ID]
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_HEADERS = {
@@ -31,23 +33,33 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 # === Initialize Pyrogram Bot ===
 app = Client("log_search_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-async def check_user_access(user_id: int) -> bool:
-    res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
-    if res.data:
-        expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
-        return expiry > datetime.now(timezone.utc)
-    return False
+def check_user_access(user_id: int) -> bool:
+    try:
+        res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
+        if res.error or not res.data:
+            return False
+        # Assuming user can have multiple keys, check if any valid
+        now_utc = datetime.now(timezone.utc)
+        for key in res.data:
+            expiry = datetime.fromisoformat(key["expiry"].replace("Z", "+00:00"))
+            if expiry > now_utc:
+                return True
+        return False
+    except Exception as e:
+        print(f"Error checking user access: {e}")
+        return False
 
 @app.on_message(filters.command("start"))
 async def start(client, message):
     try:
         user_id = message.from_user.id
         res = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
-        is_premium = False
 
+        is_premium = False
         if res.data:
             try:
-                expiry = datetime.fromisoformat(res.data[0]["expiry"].replace("Z", "+00:00"))
+                key_info = res.data[0]
+                expiry = datetime.fromisoformat(key_info["expiry"].replace("Z", "+00:00"))
                 is_premium = expiry > datetime.now(timezone.utc)
             except Exception as e:
                 print(f"Expiry parsing error: {e}")
@@ -297,7 +309,7 @@ async def redeem_key(client, message):
 
     # Check if expired
     try:
-        expiry = datetime.fromisoformat(key_info["expiry"])
+        expiry = datetime.fromisoformat(key_info["expiry"].replace("Z", "+00:00"))
         if expiry < datetime.now(timezone.utc):
             return await message.reply("⌛ This key has expired!")
     except Exception:
@@ -361,7 +373,7 @@ async def myinfo(client, message):
         return await message.reply("❌ You do not have an active premium subscription.")
 
     key_info = response.data[0]
-    expiry = datetime.fromisoformat(key_info["expiry"]).strftime('%Y-%m-%d %H:%M:%S UTC')
+    expiry = datetime.fromisoformat(key_info["expiry"].replace("Z", "+00:00"))
     await message.reply(
         f"🔑 Your Premium Info:\n"
         f"• Key: `{key_info['key']}`\n"
