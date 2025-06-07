@@ -3,13 +3,14 @@ import json
 import time
 import random
 import asyncio
-import datetime
 import requests
 import pytz
 from uuid import uuid4
 from collections import defaultdict
-
 from datetime import datetime, timedelta, timezone
+
+import logging
+logging.basicConfig(level=logging.INFO)
 
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
@@ -23,6 +24,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Debug environment
+print("ENV loaded -> API_ID:", API_ID, "| BOT_TOKEN starts with:", BOT_TOKEN[:8])
 
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
