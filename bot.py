@@ -14,7 +14,7 @@ from supabase import create_client
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = 123456789  
+ADMIN_ID = 5110224851  
 HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
 
 admin_ids = [ADMIN_ID]
