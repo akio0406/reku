@@ -4,7 +4,6 @@ import time
 import random
 import asyncio
 import datetime
-import zoneinfo
 import pytz
 from uuid import uuid4
 from collections import defaultdict
@@ -27,6 +26,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Admin IDs ---
 admin_ids = [int(i.strip()) for i in os.getenv("ADMIN_ID", "5110224851").split(",") if i.strip().isdigit()]
+print("Admin IDs:", admin_ids)
 
 # --- Pyrogram App ---
 app = Client("reku_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -39,7 +39,6 @@ async def check_user_access(user_id: int) -> bool:
         return expiry > datetime.datetime.utcnow()
     return False
 
-# --- Command: /start ---
 # --- Command: /start ---
 @app.on_message(filters.command("start"))
 async def start(client, message):
@@ -115,7 +114,6 @@ async def help_command(client, message):
     await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 # --- User Send ---
-
 user_state = {}
 
 @app.on_message(filters.command("send"))
@@ -231,7 +229,7 @@ async def process_user_content(client, message):
         user_state.pop(user_id, None)
         
 # --- Timezone helper ---
-PHT = zoneinfo.ZoneInfo("Asia/Manila")
+PHT = pytz.timezone("Asia/Manila")
 
 def utc_to_pht(dt_utc: datetime.datetime) -> datetime.datetime:
     """Convert naive or UTC datetime to Philippine Time zone aware datetime."""
@@ -254,94 +252,160 @@ def parse_duration(duration_str: str) -> datetime.datetime:
     try:
         amount = int(duration_str[:-1])
     except ValueError:
-        raise ValueError("Duration must start with a number, e.g. 10d, 3h")
-
+        raise ValueError("Duration must start with a number, e.g. 10d, 5h")
     unit = duration_str[-1].lower()
-    if unit == "m":
+    now = datetime.datetime.utcnow()
+    if unit == 'm':
         delta = datetime.timedelta(minutes=amount)
-    elif unit == "h":
+    elif unit == 'h':
         delta = datetime.timedelta(hours=amount)
-    elif unit == "d":
+    elif unit == 'd':
         delta = datetime.timedelta(days=amount)
-    elif unit == "y":
-        delta = datetime.timedelta(days=365 * amount)
+    elif unit == 'y':
+        delta = datetime.timedelta(days=amount * 365)
     else:
-        raise ValueError("Invalid duration unit. Use m/h/d/y.")
-    return datetime.datetime.utcnow() + delta
+        raise ValueError("Invalid duration unit. Use m, h, d, or y.")
+    return now + delta
 
-# --- Command: /generate ---
+# --- Command: /generate (admin only) ---
 @app.on_message(filters.command("generate") & filters.user(admin_ids))
-async def generate_key(client, message):
+async def generate_key(client, message: Message):
+    print(f"Received /generate from user {message.from_user.id}")
     if len(message.command) < 2:
-        return await message.reply("Usage: /generate <duration> (e.g. 1d, 3h)")
-    try:
-        expiry = parse_duration(message.command[1])
-    except Exception as e:
-        return await message.reply(f"Error: {e}")
-    key = uuid4().hex
-    supabase.table("reku_keys").insert({
-        "key": key,
-        "expiry": expiry.isoformat() + "Z",  # UTC ISO format with Z
-        "created": datetime.datetime.utcnow().isoformat() + "Z",
-        "duration": message.command[1],
-        "owner_id": message.from_user.id,
-        "redeemed_by": None
-    }).execute()
-    expiry_pht = utc_to_pht(expiry)
-    await message.reply(
-        f"✅ Key generated:\n<code>{key}</code>\n📅 Expires: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}",
-        parse_mode=ParseMode.HTML
-    )
-
-# --- Command: /bulkgenerate ---
-@app.on_message(filters.command("bulkgenerate") & filters.user(admin_ids))
-async def bulk_generate_keys(client, message):
-    if len(message.command) < 3:
-        return await message.reply("Usage: /bulkgenerate <duration> <count>")
+        await message.reply("Usage: /generate <duration> (e.g. 1d, 3h)")
+        return
     try:
         duration_str = message.command[1]
-        count = int(message.command[2])
         expiry = parse_duration(duration_str)
+        key = uuid4().hex
+        result = supabase.table("reku_keys").insert({
+            "key": key,
+            "expiry": expiry.isoformat() + "Z",
+            "created": datetime.datetime.utcnow().isoformat() + "Z",
+            "duration": duration_str,
+            "owner_id": message.from_user.id,
+            "redeemed_by": None
+        }).execute()
+        print("Supabase insert result:", result)
+        if result.error:
+            await message.reply(f"❌ Database error: {result.error.message}")
+            return
+
+        expiry_pht = utc_to_pht(expiry)
+        await message.reply(
+            f"✅ Key generated:\n<code>{key}</code>\n📅 Expires: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+            parse_mode=ParseMode.HTML
+        )
     except Exception as e:
-        return await message.reply(f"Error: {e}")
-    now = datetime.datetime.utcnow().isoformat() + "Z"
-    keys = [{
-        "key": uuid4().hex,
-        "expiry": expiry.isoformat() + "Z",
-        "created": now,
-        "duration": duration_str,
-        "owner_id": message.from_user.id,
-        "redeemed_by": None
-    } for _ in range(count)]
-    supabase.table("reku_keys").insert(keys).execute()
-    text = "\n".join([f"`{k['key']}`" for k in keys])
-    expiry_pht = utc_to_pht(expiry)
-    await message.reply(
-        f"✅ {count} keys generated:\n\n{text}\n\n📅 Expires: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}",
-        parse_mode=ParseMode.MARKDOWN
-    )
+        print(f"Error in /generate: {e}")
+        await message.reply(f"❌ Error: {e}")
+
+# --- Command: /bulkgenerate (admin only) ---
+@app.on_message(filters.command("bulkgenerate") & filters.user(admin_ids))
+async def bulkgenerate_keys(client, message: Message):
+    """
+    Usage: /bulkgenerate <duration> <amount>
+    Example: /bulkgenerate 1d 5
+    """
+    try:
+        args = message.command
+        if len(args) < 3:
+            await message.reply("Usage: /bulkgenerate <duration> <amount>\nExample: /bulkgenerate 1d 5")
+            return
+        
+        duration_str = args[1]
+        amount = int(args[2])
+        if amount < 1 or amount > 50:
+            await message.reply("Amount must be between 1 and 50.")
+            return
+
+        expiry = parse_duration(duration_str)
+        keys = []
+        records = []
+        now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+
+        for _ in range(amount):
+            key = uuid4().hex
+            keys.append(key)
+            records.append({
+                "key": key,
+                "expiry": expiry.isoformat() + "Z",
+                "created": now_iso,
+                "duration": duration_str,
+                "owner_id": message.from_user.id,
+                "redeemed_by": None
+            })
+
+        result = supabase.table("reku_keys").insert(records).execute()
+        if result.error:
+            await message.reply(f"❌ Database error: {result.error.message}")
+            return
+        
+        expiry_pht = utc_to_pht(expiry)
+        keys_text = "\n".join(keys)
+        await message.reply(
+            f"✅ Bulk keys generated ({amount} keys):\n\n"
+            f"<code>{keys_text}</code>\n\n"
+            f"Expires on: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
 
 # --- Command: /redeem ---
 @app.on_message(filters.command("redeem"))
-async def redeem_key(client, message):
-    if len(message.command) < 2:
-        return await message.reply("Usage: /redeem <key>")
-    key = message.command[1]
-    user_id = message.from_user.id
-    res = supabase.table("reku_keys").select("*").eq("key", key).execute()
-    if not res.data:
-        return await message.reply("❌ Invalid key.")
-    record = res.data[0]
-    if record["redeemed_by"] is not None:
-        return await message.reply("⚠️ This key has already been used.")
-    expiry = datetime.datetime.fromisoformat(record["expiry"].replace("Z", "+00:00"))
-    if expiry < datetime.datetime.utcnow():
-        return await message.reply("⛔ This key has expired.")
-    supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key).execute()
-    expiry_pht = utc_to_pht(expiry)
-    await message.reply(
-        f"✅ Key redeemed! You now have premium access.\n⏳ Expires: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}"
-    )
+async def redeem_key(client, message: Message):
+    """
+    Usage: /redeem <key>
+    Redeems a license key to your user ID.
+    """
+    try:
+        args = message.command
+        if len(args) < 2:
+            await message.reply("Usage: /redeem <key>")
+            return
+
+        key_input = args[1].strip()
+        user_id = message.from_user.id
+
+        # Check if user already redeemed a key
+        existing = supabase.table("reku_keys").select("*").eq("redeemed_by", user_id).execute()
+        if existing.data:
+            await message.reply("❌ You already have an active key redeemed.")
+            return
+
+        # Lookup the key
+        key_data = supabase.table("reku_keys").select("*").eq("key", key_input).execute()
+        if not key_data.data:
+            await message.reply("❌ Invalid key.")
+            return
+        
+        key_record = key_data.data[0]
+        if key_record["redeemed_by"]:
+            await message.reply("❌ This key has already been redeemed by another user.")
+            return
+        
+        expiry = datetime.datetime.fromisoformat(key_record["expiry"].replace("Z", "+00:00"))
+        if expiry < datetime.datetime.utcnow():
+            await message.reply("❌ This key is expired.")
+            return
+
+        # Redeem the key
+        update = supabase.table("reku_keys").update({"redeemed_by": user_id}).eq("key", key_input).execute()
+        if update.error:
+            await message.reply(f"❌ Failed to redeem key: {update.error.message}")
+            return
+
+        expiry_pht = utc_to_pht(expiry)
+        await message.reply(
+            f"✅ Key redeemed successfully!\n"
+            f"Access valid until: {expiry_pht.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+        )
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
 
 # --- Run Bot ---
-app.run()
+if __name__ == "__main__":
+    print("Bot starting...")
+    app.run()
