@@ -18,15 +18,15 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_HEADERS = {
-    "apikey": SUPABASE_SERVICE_ROLE,
-    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE}",
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json"
 }
 
 # === Initialize Supabase Client ===
-supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # === Initialize Pyrogram Bot ===
 app = Client("log_search_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
