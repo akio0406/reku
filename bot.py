@@ -409,58 +409,142 @@ async def process_user_content(client, message):
         user_state.pop(user_id, None)
 
 @app.on_message(filters.command("search"))
-async def search_command(client, message):
-    logging.info("🔍 /search triggered")
+@restricted
+async def handle_search_command(client, message):
+    user_id = message.from_user.id
+    now = datetime.now(timezone.utc)
 
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        return await message.reply(
-            "🔍 <b>Search Command Usage</b>\n\n"
-            "❌ <i>You need to specify a search term!</i>\n\n"
-            "✨ <b>Format:</b> <code>/search keyword</code>\n"
-            "🌰 <b>Example:</b> <code>/search roblox</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+    # Cooldown check
+    last_used = cooldown_tracker.get(user_id)
+    if last_used and now - last_used < COOLDOWN_PERIOD:
+        remaining = COOLDOWN_PERIOD - (now - last_used)
+        await message.reply(f"⏳ Please wait {int(remaining.total_seconds())} seconds before searching again.")
+        return
 
-    keyword = args[1].strip()
-    logging.info(f"Searching for keyword: {keyword}")
+    # Set new cooldown
+    cooldown_tracker[user_id] = now
 
-    try:
-        response = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(10).execute()
-        matches = response.data
-    except Exception as e:
-        logging.error("Database error:", exc_info=True)
-        return await message.reply(
-            f"⚠️ Error searching database: <code>{e}</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+    access_type = check_user_access(user_id)
+    if not access_type:
+        await message.reply("❌ You don't have enough search uses left or a valid key.")
+        return
+    if access_type == "referral":
+        ref = get_referral_data(user_id)
+        if ref and ref.get('search_uses_left', 0) > 0:
+            update_user_points_and_uses(user_id, ref.get('points', 0), ref['search_uses_left'] - 1)
+        else:
+            await message.reply("❌ You have no remaining search uses.")
+            return
 
-    if not matches:
-        logging.info("No matches found.")
-        return await message.reply(
-            f"🔍 No results found for <code>{keyword}</code>.",
-            parse_mode=enums.ParseMode.HTML
-        )
+    # Extract keyword
+    if len(message.command) < 2:
+        await message.reply("❗ Usage: `/search <keyword>`", parse_mode="Markdown")
+        return
 
-    preview = "\n".join([f"• {item['line']}" for item in matches if 'line' in item])
-    if not preview:
-        preview = "No preview available."
-
+    keyword = " ".join(message.command[1:])
     keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("👤 User:Pass", callback_data=f"format_{keyword}_userpass"),
-            InlineKeyboardButton("🌐 Full Details", callback_data=f"format_{keyword}_full")
-        ],
-        [InlineKeyboardButton("❌ Cancel", callback_data="search_cancel")]
+        [InlineKeyboardButton("✅ User:Pass Only", callback_data=f"searchformat_{keyword}_userpass")],
+        [InlineKeyboardButton("🌍 Include URLs", callback_data=f"searchformat_{keyword}_full")]
     ])
 
     await message.reply(
-        f"🔍 <b>Search Results Found</b> 🔎\n\n"
-        f"📌 <b>Keyword:</b> <code>{keyword}</code>\n"
-        f"📄 <b>Preview:</b>\n<code>{preview}</code>\n\n"
-        "👇 <i>Please choose your preferred output format:</i>",
+        f"🔎 **Search Keyword:** `{keyword}`\n\n📌 Choose output format:",
         reply_markup=keyboard,
-        parse_mode=enums.ParseMode.HTML
+        parse_mode="Markdown"
     )
+
+@app.on_callback_query(filters.regex("^searchformat_"))
+async def perform_direct_search(client, callback_query):
+    await callback_query.message.delete()
+
+    _, keyword, fmt = callback_query.data.split("_", 2)
+    include_urls = fmt == "full"
+    await callback_query.answer("✅ Searching the database...", show_alert=False)
+    msg = await callback_query.message.reply_text(f"🔍 Searching `{keyword}`...\n[░░░░░░░░░░] 0%")
+
+    try:
+        query = supabase.table("reku").select("line").ilike("line", f"%{keyword}%")
+        res = query.execute()
+        entries = [row['line'] for row in res.data] if res.data else []
+    except Exception as e:
+        await msg.edit_text(f"❌ Supabase error: {str(e)}")
+        return
+
+    if not entries:
+        await msg.edit_text("❌ No matches found.")
+        return
+
+    results = set()
+    for line in entries:
+        if not include_urls:
+            parts = line.split(":")
+            if len(parts) >= 2:
+                line = ":".join(parts[-2:])
+        results.add(line.strip())
+
+    if not results:
+        await msg.edit_text("❌ No valid formatted results.")
+        return
+
+    result_file = "result.txt"
+    existing_lines = []
+    if os.path.exists(result_file):
+        with open(result_file, "r", encoding="utf-8") as f:
+            existing_lines = [line.strip() for line in f]
+    line_counts = Counter(existing_lines)
+
+    filtered = [r for r in results if line_counts[r] < 2]
+    for r in filtered:
+        line_counts[r] += 1
+
+    if not filtered:
+        await msg.edit_text("❌ No new valid results (limit reached per line).")
+        return
+
+    selected = random.sample(filtered, min(len(filtered), random.randint(100, 120)))
+    with open(result_file, "w", encoding="utf-8") as f:
+        for line in selected:
+            f.write(f"{line}\n")
+
+    preview = "\n".join(selected[:5]) + ("\n..." if len(selected) > 5 else "")
+    label = "🌍 Full (with URLs)" if include_urls else "✅ User:Pass only"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📥 Download Results", callback_data=f"dlresults_{keyword}")],
+        [InlineKeyboardButton("📋 Copy Code", callback_data=f"copyresults_{keyword}")]
+    ])
+
+    await msg.edit_text(
+        f"🔎 **Results for:** `{keyword}`\n"
+        f"📄 **Format:** {label}\n"
+        f"📌 **Results Generated:** `{len(selected)}`\n\n"
+        f"🔹 **Preview:**\n```\n{preview}\n```",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+@app.on_callback_query(filters.regex("^dlresults_"))
+async def send_results_file(client, callback_query):
+    keyword = callback_query.data.split("_", 1)[1]
+    if os.path.exists("result.txt"):
+        await callback_query.message.reply_document("result.txt", caption=f"📄 Results for `{keyword}`")
+    else:
+        await callback_query.answer("❌ Results file not found!", show_alert=True)
+
+@app.on_callback_query(filters.regex("^copyresults_"))
+async def copy_results_text(client, callback_query):
+    keyword = callback_query.data.split("_", 1)[1]
+    if not os.path.exists("result.txt"):
+        await callback_query.answer("❌ Results file not found!", show_alert=True)
+        return
+    with open("result.txt", "r", encoding="utf-8") as f:
+        text = f.read()
+    if len(text) > 4096:
+        text = text[:4090] + "...\n[Truncated]"
+    await callback_query.message.reply(
+        f"🔎 <b>Results for:</b> <code>{keyword}</code>\n\n<pre>{text}</pre>",
+        parse_mode="HTML"
+    )
+
     
 app.run()
