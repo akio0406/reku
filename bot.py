@@ -11,7 +11,12 @@ from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message  # ✅ Added Message here
 
 from supabase import create_client
+import os
+from collections import Counter
+from datetime import timedelta
 
+cooldown_tracker = {}
+COOLDOWN_PERIOD = timedelta(seconds=30)  # 30-second cooldown per user
 # === Configuration (hardcoded) ===
 API_ID = 22193151  # Your API ID here
 API_HASH = "7b38173cfec819a182c81a89abdef224"
