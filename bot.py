@@ -242,6 +242,68 @@ async def remove_key(client, message):
         print(f"Error removing key: {e}")
         await message.reply("❌ Failed to remove key.")
 
+from pyrogram import filters
+from datetime import datetime
+import random
+import os
+
+@app.on_message(filters.command("search"))
+async def search_lines(client, message):
+    if len(message.command) < 2:
+        await message.reply("Usage: /search <keyword>")
+        print("[WARN] /search called without keyword.")
+        return
+
+    keyword = message.command[1]
+    print(f"[INFO] /search keyword received: '{keyword}'")
+
+    try:
+        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
+        print(f"[INFO] Supabase query executed. {len(res.data)} matches found.")
+    except Exception as e:
+        print(f"[ERROR] Supabase query failed: {e}")
+        await message.reply("❌ Error querying the database.")
+        return
+
+    data = res.data
+    if not data:
+        print(f"[INFO] No data found for keyword: '{keyword}'")
+        await message.reply(f"No results found for '{keyword}'.")
+        return
+
+    # Randomly select lines
+    min_lines = 100
+    max_lines = 150
+    max_count = min(len(data), max_lines)
+    count = random.randint(min_lines, max_count)
+    selected_lines = random.sample(data, count)
+
+    # Prepare file content
+    lines_text = "\n".join(line['line'] for line in selected_lines)
+    filename = f"search_results_{keyword}_{int(datetime.utcnow().timestamp())}.txt"
+
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(lines_text)
+        print(f"[INFO] Results written to file: {filename}")
+    except Exception as e:
+        print(f"[ERROR] Failed to write to file: {e}")
+        await message.reply("❌ Failed to write results to file.")
+        return
+
+    try:
+        await message.reply_document(filename, quote=True)
+        print(f"[INFO] Sent file to user: {filename}")
+    except Exception as e:
+        print(f"[ERROR] Failed to send document: {e}")
+        await message.reply("❌ Failed to send file.")
+    finally:
+        try:
+            os.remove(filename)
+            print(f"[INFO] Temporary file deleted: {filename}")
+        except Exception as e:
+            print(f"[WARN] Could not delete temp file: {e}")
+            
 @app.on_message(filters.command("start"))
 async def start(client, message):
     try:
@@ -412,67 +474,5 @@ async def process_user_content(client, message):
         await message.reply(f"❌ Failed to send: {str(e)}")
     finally:
         user_state.pop(user_id, None)
-
-from pyrogram import filters
-from datetime import datetime
-import random
-import os
-
-@app.on_message(filters.command("search"))
-async def search_lines(client, message):
-    if len(message.command) < 2:
-        await message.reply("Usage: /search <keyword>")
-        print("[WARN] /search called without keyword.")
-        return
-
-    keyword = message.command[1]
-    print(f"[INFO] /search keyword received: '{keyword}'")
-
-    try:
-        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
-        print(f"[INFO] Supabase query executed. {len(res.data)} matches found.")
-    except Exception as e:
-        print(f"[ERROR] Supabase query failed: {e}")
-        await message.reply("❌ Error querying the database.")
-        return
-
-    data = res.data
-    if not data:
-        print(f"[INFO] No data found for keyword: '{keyword}'")
-        await message.reply(f"No results found for '{keyword}'.")
-        return
-
-    # Randomly select lines
-    min_lines = 100
-    max_lines = 150
-    max_count = min(len(data), max_lines)
-    count = random.randint(min_lines, max_count)
-    selected_lines = random.sample(data, count)
-
-    # Prepare file content
-    lines_text = "\n".join(line['line'] for line in selected_lines)
-    filename = f"search_results_{keyword}_{int(datetime.utcnow().timestamp())}.txt"
-
-    try:
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(lines_text)
-        print(f"[INFO] Results written to file: {filename}")
-    except Exception as e:
-        print(f"[ERROR] Failed to write to file: {e}")
-        await message.reply("❌ Failed to write results to file.")
-        return
-
-    try:
-        await message.reply_document(filename, quote=True)
-        print(f"[INFO] Sent file to user: {filename}")
-    except Exception as e:
-        print(f"[ERROR] Failed to send document: {e}")
-        await message.reply("❌ Failed to send file.")
-    finally:
-        try:
-            os.remove(filename)
-            print(f"[INFO] Temporary file deleted: {filename}")
-        except Exception as e:
-            print(f"[WARN] Could not delete temp file: {e}")
         
 app.run()
