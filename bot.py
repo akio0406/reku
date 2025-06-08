@@ -243,66 +243,124 @@ async def remove_key(client, message):
         await message.reply("❌ Failed to remove key.")
 
 from pyrogram import filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import random, os
 from datetime import datetime
-import random
-import os
+from collections import Counter
 
 @app.on_message(filters.command("search"))
-async def search_lines(client, message):
+async def search_command(client, message):
+    user_id = message.from_user.id
+
     if len(message.command) < 2:
         await message.reply("Usage: /search <keyword>")
         print("[WARN] /search called without keyword.")
         return
 
-    keyword = message.command[1]
-    print(f"[INFO] /search keyword received: '{keyword}'")
+    keyword = message.command[1].strip()
+    print(f"[INFO] /search keyword received: '{keyword}' from user {user_id}")
 
+    # Format selection buttons
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ User:Pass Only", callback_data=f"fsearch_{keyword}_userpass")],
+        [InlineKeyboardButton("🌍 Include URLs", callback_data=f"fsearch_{keyword}_full")]
+    ])
+    await message.reply(
+        f"🔎 Searching keyword: `{keyword}`\n\nChoose result format:",
+        reply_markup=keyboard
+    )
+
+@app.on_callback_query(filters.regex("^fsearch_"))
+async def perform_search_callback(client, cbq):
     try:
-        res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
-        print(f"[INFO] Supabase query executed. {len(res.data)} matches found.")
-    except Exception as e:
-        print(f"[ERROR] Supabase query failed: {e}")
-        await message.reply("❌ Error querying the database.")
-        return
+        _, keyword, mode = cbq.data.split("_", 2)
+        include_urls = (mode == "full")
+        await cbq.message.delete()
+        await cbq.answer("🔍 Searching...", show_alert=False)
 
-    data = res.data
-    if not data:
-        print(f"[INFO] No data found for keyword: '{keyword}'")
-        await message.reply(f"No results found for '{keyword}'.")
-        return
+        msg = await cbq.message.reply_text(f"Searching `{keyword}`...\n[░░░░░░░░░░] 0%")
 
-    # Randomly select lines
-    min_lines = 100
-    max_lines = 150
-    max_count = min(len(data), max_lines)
-    count = random.randint(min_lines, max_count)
-    selected_lines = random.sample(data, count)
-
-    # Prepare file content
-    lines_text = "\n".join(line['line'] for line in selected_lines)
-    filename = f"search_results_{keyword}_{int(datetime.utcnow().timestamp())}.txt"
-
-    try:
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(lines_text)
-        print(f"[INFO] Results written to file: {filename}")
-    except Exception as e:
-        print(f"[ERROR] Failed to write to file: {e}")
-        await message.reply("❌ Failed to write results to file.")
-        return
-
-    try:
-        await message.reply_document(filename, quote=True)
-        print(f"[INFO] Sent file to user: {filename}")
-    except Exception as e:
-        print(f"[ERROR] Failed to send document: {e}")
-        await message.reply("❌ Failed to send file.")
-    finally:
         try:
-            os.remove(filename)
-            print(f"[INFO] Temporary file deleted: {filename}")
+            res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
+            lines = [row["line"] for row in res.data] if res.data else []
+            print(f"[INFO] Found {len(lines)} lines for keyword '{keyword}'")
         except Exception as e:
-            print(f"[WARN] Could not delete temp file: {e}")
+            print(f"[ERROR] Supabase query failed: {e}")
+            return await msg.edit_text("❌ Error querying the database.")
+
+        if not lines:
+            return await msg.edit_text("❌ No results found.")
+
+        # Format and filter
+        formatted = set()
+        for line in lines:
+            if not include_urls:
+                parts = line.split(":")
+                if len(parts) >= 2:
+                    line = ":".join(parts[-2:])
+            formatted.add(line.strip())
+
+        if not formatted:
+            return await msg.edit_text("❌ No valid formatted results.")
+
+        # Remove overused duplicates
+        result_file = "result.txt"
+        existing = []
+        if os.path.exists(result_file):
+            with open(result_file, "r", encoding="utf-8") as f:
+                existing = [x.strip() for x in f]
+        counts = Counter(existing)
+
+        filtered = [x for x in formatted if counts[x] < 2]
+        for x in filtered:
+            counts[x] += 1
+
+        if not filtered:
+            return await msg.edit_text("❌ All results already used too many times.")
+
+        selected = random.sample(filtered, min(len(filtered), random.randint(100, 120)))
+        with open(result_file, "w", encoding="utf-8") as f:
+            for line in selected:
+                f.write(f"{line}\n")
+
+        preview = "\n".join(selected[:5]) + ("\n..." if len(selected) > 5 else "")
+        fmt_label = "🌍 Full (with URLs)" if include_urls else "✅ User:Pass only"
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📥 Download Results", callback_data=f"dl_{keyword}")],
+            [InlineKeyboardButton("📋 Copy Code", callback_data=f"cc_{keyword}")]
+        ])
+        await msg.edit_text(
+            f"🔎 **Results for:** `{keyword}`\n"
+            f"📄 **Format:** {fmt_label}\n"
+            f"📌 **Generated:** `{len(selected)}`\n\n"
+            f"🔹 **Preview:**\n```\n{preview}\n```",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        print(f"[ERROR] perform_search_callback failed: {e}")
+        await cbq.message.reply("❌ An error occurred during the search.")
+
+@app.on_callback_query(filters.regex("^dl_"))
+async def send_result_file(client, cbq):
+    if os.path.exists("result.txt"):
+        await cbq.message.reply_document("result.txt", caption=f"📄 Results for `{cbq.data.split('_', 1)[1]}`")
+    else:
+        await cbq.answer("❌ Results file not found!", show_alert=True)
+
+@app.on_callback_query(filters.regex("^cc_"))
+async def copy_result_text(client, cbq):
+    if not os.path.exists("result.txt"):
+        return await cbq.answer("❌ Results file not found!", show_alert=True)
+    with open("result.txt", "r", encoding="utf-8") as f:
+        text = f.read()
+    if len(text) > 4096:
+        text = text[:4090] + "...\n[Truncated]"
+    await cbq.message.reply(
+        f"📋 **Results for** `{cbq.data.split('_', 1)[1]}`\n\n<pre>{text}</pre>",
+        parse_mode="HTML"
+    )
             
 @app.on_message(filters.command("start"))
 async def start(client, message):
