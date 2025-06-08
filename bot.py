@@ -410,7 +410,9 @@ async def process_user_content(client, message):
 
 @app.on_message(filters.command("search"))
 async def search_command(client, message):
-    args = message.text.split()
+    logging.info("🔍 /search triggered")
+
+    args = message.text.split(maxsplit=1)
     if len(args) < 2:
         return await message.reply(
             "🔍 <b>Search Command Usage</b>\n\n"
@@ -419,22 +421,30 @@ async def search_command(client, message):
             "🌰 <b>Example:</b> <code>/search roblox</code>",
             parse_mode=enums.ParseMode.HTML
         )
-    
-    keyword = args[1].strip()
 
-    # Query the "reku" table where "line" contains the keyword
+    keyword = args[1].strip()
+    logging.info(f"Searching for keyword: {keyword}")
+
     try:
         response = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(10).execute()
         matches = response.data
     except Exception as e:
-        return await message.reply(f"⚠️ Error searching database: <code>{e}</code>", parse_mode=enums.ParseMode.HTML)
+        logging.error("Database error:", exc_info=True)
+        return await message.reply(
+            f"⚠️ Error searching database: <code>{e}</code>",
+            parse_mode=enums.ParseMode.HTML
+        )
 
     if not matches:
-        return await message.reply(f"🔍 No results found for <code>{keyword}</code>.", parse_mode=enums.ParseMode.HTML)
+        logging.info("No matches found.")
+        return await message.reply(
+            f"🔍 No results found for <code>{keyword}</code>.",
+            parse_mode=enums.ParseMode.HTML
+        )
 
-    # Optional: Show a preview of results
-    preview = "\n".join([f"• {item['line']}" for item in matches[:5]])
-    preview = preview if preview else "No preview available."
+    preview = "\n".join([f"• {item['line']}" for item in matches if 'line' in item])
+    if not preview:
+        preview = "No preview available."
 
     keyboard = InlineKeyboardMarkup([
         [
@@ -443,7 +453,7 @@ async def search_command(client, message):
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="search_cancel")]
     ])
-    
+
     await message.reply(
         f"🔍 <b>Search Results Found</b> 🔎\n\n"
         f"📌 <b>Keyword:</b> <code>{keyword}</code>\n"
