@@ -409,7 +409,6 @@ async def process_user_content(client, message):
         user_state.pop(user_id, None)
 
 @app.on_message(filters.command("search"))
-@restricted
 async def handle_search_command(client, message):
     user_id = message.from_user.id
     now = datetime.now(timezone.utc)
