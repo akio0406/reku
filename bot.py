@@ -409,70 +409,48 @@ async def process_user_content(client, message):
         user_state.pop(user_id, None)
 
 @app.on_message(filters.command("search"))
-async def search_line(client: Client, message: Message):
-    print("📥 /search command received")
+async def search_command(client, message):
+    args = message.text.split()
+    if len(args) < 2:
+        return await message.reply(
+            "🔍 <b>Search Command Usage</b>\n\n"
+            "❌ <i>You need to specify a search term!</i>\n\n"
+            "✨ <b>Format:</b> <code>/search keyword</code>\n"
+            "🌰 <b>Example:</b> <code>/search roblox</code>",
+            parse_mode=enums.ParseMode.HTML
+        )
+    
+    keyword = args[1].strip()
 
-    if len(message.command) < 2:
-        return await message.reply("❌ Usage: /search <keyword>")
-
-    keyword = message.command[1].lower()
-    print(f"🔍 Searching for: {keyword}")
-
+    # Query the "reku" table where "line" contains the keyword
     try:
-        result = supabase.table("reku").select("*").ilike("line", f"%{keyword}%").execute()
-        
-        # ✅ Add error logging
-        if result.error:
-            print(f"❌ Supabase Error: {result.error}")
-            return await message.reply("❌ Failed to search database. Please try again later.")
-
-        rows = result.data or []
-        print(f"✅ Rows fetched: {len(rows)}")
-
-        if not rows:
-            return await message.reply("🔍 No matching lines found.")
-
-        # ✅ Sample safely
-        sample_size = random.randint(1, min(len(rows), 150))
-        selected_rows = random.sample(rows, sample_size)
-
-        formatted = []
-        for row in selected_rows:
-            formatted.append(
-                f"🆔 ID: `{row.get('id', 'N/A')}`\n"
-                f"📁 Category: `{row.get('category', 'N/A')}`\n"
-                f"👤 Username: `{row.get('username', 'N/A')}`\n"
-                f"🔑 Pass: `{row.get('pass', 'N/A')}`\n"
-                f"📝 Line: `{row.get('line', 'N/A')}`\n"
-                f"📅 Created At: `{row.get('created_at', 'N/A')}`\n"
-                "───────────────"
-            )
-
-        file_content = "\n\n".join(formatted)
-        filename = f"ISAGI_{keyword}.txt"
-
-        # ✅ File writing with error handling
-        try:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(file_content)
-            print(f"📁 File saved: {filename}")
-        except Exception as file_error:
-            print("❌ File writing error:", file_error)
-            return await message.reply("❌ Failed to create result file.")
-
-        # ✅ Send file
-        try:
-            await message.reply_document(
-                document=filename,
-                caption=f"📄 Results for `{keyword}` ({sample_size} entries)"
-            )
-        except Exception as send_error:
-            print("❌ Error sending file:", send_error)
-            return await message.reply("❌ Failed to send the file. It might be too large.")
-
+        response = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").limit(10).execute()
+        matches = response.data
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        await message.reply(f"❌ An error occurred during search: {e}")
+        return await message.reply(f"⚠️ Error searching database: <code>{e}</code>", parse_mode=enums.ParseMode.HTML)
 
+    if not matches:
+        return await message.reply(f"🔍 No results found for <code>{keyword}</code>.", parse_mode=enums.ParseMode.HTML)
+
+    # Optional: Show a preview of results
+    preview = "\n".join([f"• {item['line']}" for item in matches[:5]])
+    preview = preview if preview else "No preview available."
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👤 User:Pass", callback_data=f"format_{keyword}_userpass"),
+            InlineKeyboardButton("🌐 Full Details", callback_data=f"format_{keyword}_full")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="search_cancel")]
+    ])
+    
+    await message.reply(
+        f"🔍 <b>Search Results Found</b> 🔎\n\n"
+        f"📌 <b>Keyword:</b> <code>{keyword}</code>\n"
+        f"📄 <b>Preview:</b>\n<code>{preview}</code>\n\n"
+        "👇 <i>Please choose your preferred output format:</i>",
+        reply_markup=keyboard,
+        parse_mode=enums.ParseMode.HTML
+    )
+    
 app.run()
