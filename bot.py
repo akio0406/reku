@@ -505,6 +505,8 @@ async def help_command(client, message):
     )
     await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
+from pyrogram.errors import MessageNotModified
+
 # ── Shared user_state for feedback, payment, file uploads ──
 user_state = {}
 
@@ -548,7 +550,15 @@ async def handle_callback(client, callback_query):
 
     elif data == "cancel_action":
         user_state.pop(user_id, None)
-        await callback_query.message.edit_text("❌ Action cancelled.")
+        new_text = "❌ Action cancelled."
+        try:
+            # only edit if message actually differs
+            if callback_query.message.text != new_text:
+                await callback_query.message.edit_text(new_text)
+            else:
+                await callback_query.answer("Already cancelled.", show_alert=False)
+        except MessageNotModified:
+            await callback_query.answer("❌ Action cancelled.", show_alert=False)
 
 @app.on_message(filters.command("cancel"))
 async def cancel_command(client, message):
@@ -601,6 +611,7 @@ async def process_user_content(client, message):
             await client.send_video(ADMIN_ID, message.video.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
         else:
             await client.send_message(ADMIN_ID, caption, parse_mode=ParseMode.MARKDOWN)
+
         await message.reply("✅ Your message has been sent to the admin. Thank you!")
     except Exception as e:
         await message.reply(f"❌ Failed to send: {e}")
