@@ -156,7 +156,6 @@ async def remove_key(client, message):
 
 @app.on_message(filters.command("removeallkeys") & filters.user(ADMIN_ID))
 async def remove_all_keys(client, message):
-    # require a confirm argument to avoid accidents
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2 or parts[1].lower() != "confirm":
         return await message.reply(
@@ -164,10 +163,18 @@ async def remove_all_keys(client, message):
             "Type `/removeallkeys confirm` to proceed.",
             parse_mode=ParseMode.MARKDOWN
         )
-    res = supabase.table("keys_reku").delete().execute()
-    count = len(getattr(res, "data", []) or [])
-    await message.reply(f"🗑️ All keys removed: {count} rows deleted.")
 
+    # DELETE requires a WHERE clause—use key != "" to match every row
+    res = supabase.table("keys_reku") \
+                  .delete() \
+                  .neq("key", "") \
+                  .execute()
+
+    rows = getattr(res, "data", []) or []
+    count = len(rows)
+
+    await message.reply(f"🗑️ All keys removed: {count} rows deleted.")
+    
 @app.on_message(filters.command("broadcast") & filters.user(ADMIN_ID))
 async def broadcast_message(client, message):
     if len(message.command) < 2:
