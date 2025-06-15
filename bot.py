@@ -12,7 +12,7 @@ from pytz import timezone as pytz_timezone  # Renamed to avoid conflict
 
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 
 from supabase import create_client
 
@@ -90,7 +90,7 @@ def requires_premium(func):
             return
 
         # do the access check
-        if not await check_user_access(uid):
+        if not check_user_access(uid):
             return await deny()
 
         # user is premium, run the real handler
