@@ -2,18 +2,20 @@ import re
 import random
 import string
 import logging
-from datetime import datetime, timedelta, timezone  # keep this for datetime timezone
+import os
+import functools
 
-from pytz import timezone as pytz_timezone          # renamed to avoid conflict
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+
+from pytz import timezone as pytz_timezone  # Renamed to avoid conflict
 
 from pyrogram import Client, filters, enums
 from pyrogram.enums import ParseMode
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message  # ✅ Added Message here
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
 from supabase import create_client
-import os
-from collections import Counter
-from datetime import timedelta
+
 
 cooldown_tracker = {}
 COOLDOWN_PERIOD = timedelta(seconds=30)  # 30-second cooldown per user
@@ -73,6 +75,29 @@ def parse_duration(duration_str: str) -> int:
     else:
         return None
 
+def requires_premium(func):
+    @functools.wraps(func)
+    async def wrapper(client, update):
+        # figure out the user & how to reply
+        if isinstance(update, Message):
+            uid = update.from_user.id
+            deny = lambda: update.reply("⛔ Redeem a key first with `/redeem <key>`.") 
+        elif isinstance(update, CallbackQuery):
+            uid = update.from_user.id
+            deny = lambda: update.answer("⛔ Redeem a key first with `/redeem <key>`.", show_alert=True)
+        else:
+            # shouldn’t happen
+            return
+
+        # do the access check
+        if not await check_user_access(uid):
+            return await deny()
+
+        # user is premium, run the real handler
+        return await func(client, update)
+
+    return wrapper
+    
 @app.on_message(filters.command("generate"))
 async def generate_key(client, message):
     if message.from_user.id != ADMIN_ID:
@@ -194,6 +219,7 @@ async def redeem_key(client, message):
         print(f"[!] Error sending reply: {e}")
 
 @app.on_message(filters.command("myinfo"))
+@requires_premium
 async def myinfo(client, message):
     user_id = message.from_user.id
 
@@ -242,13 +268,8 @@ async def remove_key(client, message):
         print(f"Error removing key: {e}")
         await message.reply("❌ Failed to remove key.")
 
-from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import random, os
-from datetime import datetime
-from collections import Counter
-
 @app.on_message(filters.command("search"))
+@requires_premium
 async def search_command(client, message):
     user_id = message.from_user.id
 
@@ -414,6 +435,7 @@ async def start(client, message):
         print(f"Error in /start: {e}")
 
 @app.on_message(filters.command("help"))
+@requires_premium
 async def help_command(client, message):
     help_text = (
         "🔥 <b>BOT COMMANDS</b> 🔥\n\n"
