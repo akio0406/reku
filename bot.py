@@ -507,7 +507,7 @@ async def help_command(client, message):
 
 from pyrogram.errors import MessageNotModified
 
-# ── Shared user_state for feedback, payment, file uploads ──
+# ── Shared user_state for feedback, payment & file uploads ──
 user_state = {}
 
 @app.on_message(filters.command("send"))
@@ -523,47 +523,82 @@ async def send_command(client, message):
 async def handle_callback(client, callback_query):
     user_id = callback_query.from_user.id
     data = callback_query.data
-
     if data == "send_feedback":
         user_state[user_id] = {"action": "awaiting_feedback"}
         await callback_query.message.edit_text(
             "📣 Please send your feedback (text, photo, or video).\n\n"
-            "You can include:\n"
-            "- Bug reports\n"
-            "- Feature requests\n"
-            "- General feedback\n\n"
             "Type /cancel to abort."
         )
-
     elif data == "send_payment":
         user_state[user_id] = {"action": "awaiting_payment_proof"}
         await callback_query.message.edit_text(
-            "💳 <b>Payment Process</b> 💳\n\n"
-            "1. Send your payment proof (screenshot/photo)\n"
-            "2. Include amount paid in the caption\n"
-            "3. Your payment will be verified within 24 hours\n\n"
-            "📝 Example caption:\n"
-            "<code>Payment for Premium Access - ₱200</code>\n\n"
+            "💳 Send your payment proof (screenshot/photo) with amount in the caption.\n\n"
             "Type /cancel to abort.",
             parse_mode=ParseMode.HTML
         )
-
     elif data == "cancel_action":
         user_state.pop(user_id, None)
-        new_text = "❌ Action cancelled."
-        try:
-            # only edit if message actually differs
-            if callback_query.message.text != new_text:
-                await callback_query.message.edit_text(new_text)
-            else:
-                await callback_query.answer("Already cancelled.", show_alert=False)
-        except MessageNotModified:
-            await callback_query.answer("❌ Action cancelled.", show_alert=False)
+        await callback_query.message.edit_text("❌ Action cancelled.")
 
 @app.on_message(filters.command("cancel"))
 async def cancel_command(client, message):
     user_state.pop(message.from_user.id, None)
     await message.reply("❌ Action cancelled.")
+
+
+# ── URL removal flow ──
+@app.on_message(filters.command("removeurl"))
+async def remove_url_request(client, message: Message):
+    """ Ask user to upload a file for URL removal """
+    user_state[message.from_user.id] = {"action": "awaiting_file"}
+    await message.reply("📂 Please upload the file containing URLs, and I'll remove them!")
+
+@app.on_message(filters.document)
+async def process_file(client, message: Message):
+    """ Process the uploaded file and strip out URLs """
+    user_id = message.from_user.id
+
+    # Only proceed if we asked for a file
+    if user_state.get(user_id, {}).get("action") != "awaiting_file":
+        return
+
+    user_state.pop(user_id, None)  # clear that “awaiting_file” state
+
+    # Download and read
+    file_path = await message.download()
+    with open(file_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # Remove URLs (assumes URL is everything before the last two “:”-separated parts)
+    cleaned = []
+    for line in lines:
+        parts = line.strip().split(":")
+        if len(parts) >= 3:
+            cleaned.append(f"{parts[-2]}:{parts[-1]}")
+        else:
+            cleaned.append(line.strip())
+
+    # If nothing changed, tell the user
+    if cleaned == lines:
+        await message.reply("🤔 No URLs found to remove!")
+        os.remove(file_path)
+        return
+
+    # Write out the result
+    out_path = "results_removedurl.txt"
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(cleaned))
+
+    # Send it back
+    await client.send_document(
+        chat_id=message.chat.id,
+        document=out_path,
+        caption="✅ Here’s your file with URLs stripped!"
+    )
+
+    # Clean up temp files
+    os.remove(file_path)
+    os.remove(out_path)
 
 @app.on_message((filters.text | filters.photo | filters.video))
 async def process_user_content(client, message):
@@ -617,57 +652,5 @@ async def process_user_content(client, message):
         await message.reply(f"❌ Failed to send: {e}")
     finally:
         user_state.pop(user_id, None)
-
-
-# ── URL removal flow ──
-@app.on_message(filters.command("removeurl"))
-async def remove_url_request(client, message: Message):
-    """ Ask user to upload a file for URL removal """
-    user_state[message.from_user.id] = {"action": "awaiting_file"}
-    await message.reply("📂 Please upload the file containing URLs, and I'll remove them!")
-
-@app.on_message(filters.document)
-async def process_file(client, message: Message):
-    """ Process uploaded file and remove URLs """
-    user_id = message.from_user.id
-    if user_state.get(user_id, {}).get("action") != "awaiting_file":
-        return
-
-    user_state.pop(user_id, None)  # Reset state
-
-    # Download & read
-    file_path = await message.download()
-    with open(file_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    # Strip URLs
-    cleaned = []
-    for line in lines:
-        parts = line.strip().split(":")
-        if len(parts) >= 3:
-            cleaned.append(f"{parts[-2]}:{parts[-1]}")
-        else:
-            cleaned.append(line.strip())
-
-    # If unchanged
-    if cleaned == lines:
-        await message.reply("🤔 There's already no URL in there, dummy!")
-        os.remove(file_path)
-        return
-
-    # Write & send result
-    out_path = "results_removedurl.txt"
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(cleaned))
-
-    await client.send_document(
-        chat_id=message.chat.id,
-        document=out_path,
-        caption="✅ Here is your cleaned file without URLs!"
-    )
-
-    # Cleanup
-    os.remove(file_path)
-    os.remove(out_path)
         
 app.run()
