@@ -278,16 +278,18 @@ async def broadcast_message(client, message):
 
     # 2) fetch all redeemed users from Supabase
     try:
-        res = supabase \
-            .table("keys_reku") \
-            .select("redeemed_by") \
-            .not_("redeemed_by", None) \
+        res = (
+            supabase
+            .table("keys_reku")
+            .select("redeemed_by")
+            .neq("redeemed_by", None)   # only those who have redeemed
             .execute()
+        )
         if res.error:
             raise Exception(res.error)
-        # collect unique user_ids
-        users = {row["redeemed_by"] for row in res.data if row.get("redeemed_by")}
-    except Exception as e:
+        # make a unique set of user IDs
+        users = {row["redeemed_by"] for row in res.data}
+    except Exception:
         logging.exception("Failed to load subscriber list")
         return await message.reply("❌ Could not fetch subscriber list. Try again later.")
 
