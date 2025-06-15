@@ -268,6 +268,56 @@ async def remove_key(client, message):
         print(f"Error removing key: {e}")
         await message.reply("❌ Failed to remove key.")
 
+@app.on_message(filters.command("broadcast") & filters.user(ADMIN_ID))
+async def broadcast_message(client, message):
+    # 1) validate syntax
+    if len(message.command) < 2:
+        return await message.reply("❌ Usage: /broadcast <your announcement text>")
+
+    broadcast_text = message.text.split(maxsplit=1)[1]
+
+    # 2) fetch all redeemed users from Supabase
+    try:
+        res = supabase \
+            .table("keys_reku") \
+            .select("redeemed_by") \
+            .not_("redeemed_by", None) \
+            .execute()
+        if res.error:
+            raise Exception(res.error)
+        # collect unique user_ids
+        users = {row["redeemed_by"] for row in res.data if row.get("redeemed_by")}
+    except Exception as e:
+        logging.exception("Failed to load subscriber list")
+        return await message.reply("❌ Could not fetch subscriber list. Try again later.")
+
+    if not users:
+        return await message.reply("ℹ️ No active subscribers to broadcast to.")
+
+    # 3) confirm and start
+    await message.reply(f"📢 Broadcasting to {len(users)} subscribers…")
+
+    success = failed = 0
+    for uid in users:
+        try:
+            await client.send_message(
+                chat_id=uid,
+                text=f"📢 <b>Announcement from Admin:</b>\n\n{broadcast_text}",
+                parse_mode=enums.ParseMode.HTML
+            )
+            success += 1
+        except Exception:
+            failed += 1
+            logging.exception(f"Broadcast failed for user {uid}")
+        await asyncio.sleep(0.3)  # gentle pacing
+
+    # 4) summary
+    await message.reply(
+        f"📊 Broadcast completed:\n"
+        f"✅ Delivered: {success}\n"
+        f"❌ Failed: {failed}"
+    )
+    
 @app.on_message(filters.command("search"))
 @requires_premium
 async def search_command(client, message):
