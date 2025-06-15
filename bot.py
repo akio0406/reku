@@ -16,6 +16,23 @@ from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 
 from supabase import create_client
+from collections import defaultdict
+
+# if your data‐table is called "reku", otherwise change to "entries"
+LINES_TABLE = "reku"
+
+CATEGORIES = [
+    "vip1",
+    "vip2"
+]
+
+KEYWORDS = [
+    "100082", "authgop", "roblox", "Ml", "8ball", "amazon",
+    "clashofclans", "fornite", "minecraft", "netflix", "steam",
+    "sso_garena", "vk", "YouTube", "apex", "binance", "uber",
+    "tiktok", "riotgames"
+]
+
 
 
 cooldown_tracker = {}
@@ -210,6 +227,55 @@ async def broadcast_message(client, message):
         await asyncio.sleep(0.3)
 
     await message.reply(f"📊 Broadcast done:\n✅ {success} delivered\n❌ {failed} failed")
+
+@app.on_message(filters.command("checklines") & filters.user(ADMIN_ID))
+async def check_lines(client, message: Message):
+    """
+    Counts how many lines in each VIP category,
+    plus keyword‐matches in the entire table.
+    Only admin can run this.
+    """
+    try:
+        counts = defaultdict(int)
+
+        # 1) count rows by category
+        for cat in CATEGORIES:
+            res = (
+                supabase
+                .table(LINES_TABLE)
+                .select("id", count="exact")
+                .eq("category", cat)
+                .execute()
+            )
+            counts[cat] = getattr(res, "count", 0) or 0
+
+        # 2) count matches in 'line' column
+        for kw in KEYWORDS:
+            res = (
+                supabase
+                .table(LINES_TABLE)
+                .select("line", count="exact")
+                .ilike("line", f"%{kw}%")
+                .execute()
+            )
+            counts[kw] = getattr(res, "count", 0) or 0
+
+        # 3) build the box
+        box = []
+        box.append("╔══════════════════════════════════╗")
+        box.append("║      🔍 LINES STATUS CHECK       ║")
+        box.append("╠══════════════════════════════════╣")
+        for cat in CATEGORIES:
+            box.append(f"║ {cat:<10} ({counts[cat]:>5}) lines")
+        box.append("╠──────────────────────────────────╣")
+        for kw in KEYWORDS:
+            box.append(f"║ {kw:<12} ({counts[kw]:>5}) lines")
+        box.append("╚══════════════════════════════════╝")
+
+        await message.reply_text("\n".join(box))
+
+    except Exception as e:
+        await message.reply_text(f"❌ Error in /checklines: {e}")
 
 def escape_md(text):
     # Escape only *, _, and ` for Markdown (basic)
