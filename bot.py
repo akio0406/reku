@@ -498,42 +498,44 @@ async def help_command(client, message):
 
 from pyrogram.errors import MessageNotModified
 
-# ── Shared user_state for feedback, payment, URL-removal & merge ──
+# ── Shared user_state for feedback, payment, URL‐removal & merge ──
 user_state = {}
 
-# 1) Feedback / Payment prompt
 @app.on_message(filters.command("send"))
 async def send_command(client, message):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📣 Feedback", callback_data="send_feedback"),
-         InlineKeyboardButton("💳 Payment", callback_data="send_payment")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_action")]
+         InlineKeyboardButton("💳 Payment",  callback_data="send_payment")],
+        [InlineKeyboardButton("❌ Cancel",   callback_data="cancel_action")]
     ])
     await message.reply("📨 What would you like to send?", reply_markup=keyboard)
 
 @app.on_callback_query()
 async def handle_callback(client, callback_query):
-    uid = callback_query.from_user.id
+    uid  = callback_query.from_user.id
     data = callback_query.data
 
     if data == "send_feedback":
         user_state[uid] = {"action": "awaiting_feedback"}
-        await callback_query.message.edit_text(
-            "📣 Please send your feedback (text, photo, or video).\n\n"
-            "Type /cancel to abort."
-        )
-
+        text = "📣 Please send your feedback (text, photo, or video).\n\nType /cancel to abort."
     elif data == "send_payment":
         user_state[uid] = {"action": "awaiting_payment_proof"}
-        await callback_query.message.edit_text(
-            "💳 Please send your payment proof (screenshot/photo) with amount in caption.\n\n"
-            "Type /cancel to abort.",
-            parse_mode=ParseMode.HTML
-        )
-
+        text = ("💳 Please send your payment proof (screenshot/photo) with amount in caption.\n\n"
+                "Type /cancel to abort.")
     elif data == "cancel_action":
         user_state.pop(uid, None)
-        await callback_query.message.edit_text("❌ Action cancelled.")
+        text = "❌ Action cancelled."
+    else:
+        return
+
+    # Safely edit or fallback to answer()
+    try:
+        if callback_query.message.text != text:
+            await callback_query.message.edit_text(text, parse_mode=ParseMode.HTML)
+        else:
+            await callback_query.answer(text, show_alert=False)
+    except MessageNotModified:
+        await callback_query.answer(text, show_alert=False)
 
 @app.on_message(filters.command("cancel"))
 async def cancel_command(client, message):
@@ -541,118 +543,117 @@ async def cancel_command(client, message):
     await message.reply("❌ Action cancelled.")
 
 
-# 2) Remove URL flow (premium only)
-@app.on_message(filters.command("removeurl") & requires_premium)
+# ── URL removal flow ──
+@app.on_message(filters.command("removeurl"))
+@requires_premium
 async def remove_url_request(client, message: Message):
     user_state[message.from_user.id] = {"action": "awaiting_file"}
     await message.reply("📂 Please upload the file containing URLs to strip.")
 
-# 3) Merge flow (premium only)
-@app.on_message(filters.command("merge") & requires_premium)
+# ── Merge flow ──
+@app.on_message(filters.command("merge"))
+@requires_premium
 async def merge_request(client, message: Message):
     user_state[message.from_user.id] = {"action": "awaiting_merge", "files": []}
     await message.reply(
         "📂 Send the files you want to merge (at least 2), then type /done when ready."
     )
 
-@app.on_message(filters.command("done") & requires_premium)
+@app.on_message(filters.command("done"))
+@requires_premium
 async def merge_done(client, message: Message):
-    uid = message.from_user.id
-    state = user_state.get(uid)
-    if not state or state.get("action") != "awaiting_merge":
-        return await message.reply("❌ No merge in progress. Use /merge first.")
+    uid   = message.from_user.id
+    state = user_state.get(uid, {})
     files = state.get("files", [])
+
+    if state.get("action") != "awaiting_merge":
+        return await message.reply("❌ No merge in progress. Use /merge first.")
     if len(files) < 2:
-        return await message.reply("❌ Please upload at least 2 files before typing /done.")
+        return await message.reply("❌ Upload at least 2 files before /done.")
 
     out_path = "merged.txt"
     with open(out_path, "w", encoding="utf-8") as out:
         for fp in files:
-            with open(fp, "r", encoding="utf-8") as inp:
-                out.write(inp.read())
-                out.write("\n")
+            out.write(open(fp, "r", encoding="utf-8").read())
+            out.write("\n")
+
     await client.send_document(message.chat.id, out_path, caption="✅ Here’s your merged file!")
-    # cleanup
     for fp in files:
         os.remove(fp)
     os.remove(out_path)
     user_state.pop(uid, None)
 
 
-# 4) Single document handler for URL-removal & merge
+# ── Unified document handler** ──
 @app.on_message(filters.document)
 async def document_handler(client, message: Message):
-    uid = message.from_user.id
+    uid   = message.from_user.id
     state = user_state.get(uid, {})
 
-    # URL-removal
+    # URL‐removal
     if state.get("action") == "awaiting_file":
         user_state.pop(uid, None)
-        file_path = await message.download()
-        with open(file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        cleaned = []
-        for line in lines:
-            parts = line.strip().split(":")
-            cleaned.append(f"{parts[-2]}:{parts[-1]}" if len(parts) >= 3 else line.strip())
-
+        fp = await message.download()
+        lines = open(fp, "r", encoding="utf-8").readlines()
+        cleaned = [
+            f"{parts[-2]}:{parts[-1]}" if (parts:=line.strip().split(":")) and len(parts)>=3 else line.strip()
+            for line in lines
+        ]
         if cleaned == lines:
             await message.reply("🤔 No URLs found to remove!")
         else:
             out = "results_removedurl.txt"
-            with open(out, "w", encoding="utf-8") as f:
-                f.write("\n".join(cleaned))
+            open(out, "w", encoding="utf-8").write("\n".join(cleaned))
             await client.send_document(message.chat.id, out, caption="✅ URLs stripped!")
             os.remove(out)
-        os.remove(file_path)
+        os.remove(fp)
         return
 
-    # Merge
+    # Merge accumulation
     if state.get("action") == "awaiting_merge":
         fp = await message.download()
         state["files"].append(fp)
         await message.reply(f"✅ Received file #{len(state['files'])}. Send /done when finished.")
         return
 
-    # otherwise, let other handlers run
+    # otherwise let other handlers proceed
     return
 
 
-# 5) Feedback/payment back-end
+# ── Feedback/payment back‐end ──
 @app.on_message((filters.text | filters.photo | filters.video))
 async def process_user_content(client, message):
-    uid = message.from_user.id
+    uid   = message.from_user.id
     state = user_state.get(uid)
     if not state:
         return
 
-    action = state["action"]
+    action  = state["action"]
     content = message.text or message.caption or "[No message text]"
 
     try:
-        user = await client.get_users(uid)
-        user_info = user.first_name + (f" {user.last_name}" if user.last_name else "")
-        if user.username:
-            user_info += f" (@{user.username})"
+        u = await client.get_users(uid)
+        ui = u.first_name + (f" {u.last_name}" if u.last_name else "")
+        ui += f" (@{u.username})" if u.username else ""
     except:
-        user_info = f"User ID: {uid}"
+        ui = f"User ID: {uid}"
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     if action == "awaiting_feedback":
-        caption = (
+        cap = (
             f"📬 *New Feedback*\n\n"
-            f"👤 *From:* {user_info}\n"
-            f"🆔 *User ID:* {uid}\n"
-            f"📅 *Date:* {now}\n\n"
+            f"👤 *From:* {ui}\n"
+            f"🆔 *ID:*      {uid}\n"
+            f"📅 *Date:*    {now}\n\n"
             f"💬 *Feedback:*\n{content}"
         )
     elif action == "awaiting_payment_proof":
-        caption = (
+        cap = (
             f"💰 *New Payment Proof*\n\n"
-            f"👤 *From:* {user_info}\n"
-            f"🆔 *User ID:* {uid}\n"
-            f"📅 *Date:* {now}\n\n"
+            f"👤 *From:* {ui}\n"
+            f"🆔 *ID:*      {uid}\n"
+            f"📅 *Date:*    {now}\n\n"
             f"💬 *Caption:*\n{content}"
         )
     else:
@@ -660,11 +661,11 @@ async def process_user_content(client, message):
 
     try:
         if message.photo:
-            await client.send_photo(ADMIN_ID, message.photo.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
+            await client.send_photo(ADMIN_ID, message.photo.file_id, caption=cap, parse_mode=ParseMode.MARKDOWN)
         elif message.video:
-            await client.send_video(ADMIN_ID, message.video.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
+            await client.send_video(ADMIN_ID, message.video.file_id, caption=cap, parse_mode=ParseMode.MARKDOWN)
         else:
-            await client.send_message(ADMIN_ID, caption, parse_mode=ParseMode.MARKDOWN)
+            await client.send_message(ADMIN_ID, cap, parse_mode=ParseMode.MARKDOWN)
         await message.reply("✅ Your message has been sent to the admin. Thank you!")
     except Exception as e:
         await message.reply(f"❌ Failed to send: {e}")
