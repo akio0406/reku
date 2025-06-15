@@ -276,19 +276,17 @@ async def broadcast_message(client, message):
 
     broadcast_text = message.text.split(maxsplit=1)[1]
 
-    # 2) fetch all redeemed users from Supabase
+    # 2) fetch all redeemed users from Supabase (no filter on the query)
     try:
-        res = (
-            supabase
-            .table("keys_reku")
-            .select("redeemed_by")
-            .neq("redeemed_by", None)   # only those who have redeemed
-            .execute()
-        )
+        res = supabase.table("keys_reku") \
+                      .select("redeemed_by") \
+                      .execute()
         if res.error:
             raise Exception(res.error)
-        # make a unique set of user IDs
-        users = {row["redeemed_by"] for row in res.data}
+
+        # filter out None/NULL in Python & dedupe
+        users = {row["redeemed_by"] for row in res.data
+                 if row.get("redeemed_by") not in (None, "None", "")}
     except Exception:
         logging.exception("Failed to load subscriber list")
         return await message.reply("❌ Could not fetch subscriber list. Try again later.")
@@ -303,7 +301,7 @@ async def broadcast_message(client, message):
     for uid in users:
         try:
             await client.send_message(
-                chat_id=uid,
+                chat_id=int(uid),
                 text=f"📢 <b>Announcement from Admin:</b>\n\n{broadcast_text}",
                 parse_mode=enums.ParseMode.HTML
             )
