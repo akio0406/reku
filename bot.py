@@ -41,7 +41,7 @@ COOLDOWN_PERIOD = timedelta(seconds=30)  # 30-second cooldown per user
 API_ID = 22193151  # Your API ID here
 API_HASH = "7b38173cfec819a182c81a89abdef224"
 BOT_TOKEN = "7976486179:AAFe7462sUPNmxBQaN-MDCICIN9YqEKbMnw"
-ADMIN_ID = 5110224851  # Single admin ID only
+ADMIN_ID = 6649502398  # Single admin ID only
 
 SUPABASE_URL = "https://psxjagzdlcrxtonmezpm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBzeGphZ3pkbGNyeHRvbm1lenBtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDIwNDM2OCwiZXhwIjoyMDU5NzgwMzY4fQ.9-UTy_y0qDEfK6N0n_YspX3BcY3CVMb2bk9tPaiddWU"
