@@ -498,9 +498,10 @@ async def help_command(client, message):
 
 from pyrogram.errors import MessageNotModified
 
-# ── Shared user_state for feedback, payment & file uploads ──
+# ── Shared user_state for feedback, payment, URL-removal & merge ──
 user_state = {}
 
+# 1) Feedback / Payment prompt
 @app.on_message(filters.command("send"))
 async def send_command(client, message):
     keyboard = InlineKeyboardMarkup([
@@ -512,23 +513,26 @@ async def send_command(client, message):
 
 @app.on_callback_query()
 async def handle_callback(client, callback_query):
-    user_id = callback_query.from_user.id
+    uid = callback_query.from_user.id
     data = callback_query.data
+
     if data == "send_feedback":
-        user_state[user_id] = {"action": "awaiting_feedback"}
+        user_state[uid] = {"action": "awaiting_feedback"}
         await callback_query.message.edit_text(
             "📣 Please send your feedback (text, photo, or video).\n\n"
             "Type /cancel to abort."
         )
+
     elif data == "send_payment":
-        user_state[user_id] = {"action": "awaiting_payment_proof"}
+        user_state[uid] = {"action": "awaiting_payment_proof"}
         await callback_query.message.edit_text(
-            "💳 Send your payment proof (screenshot/photo) with amount in the caption.\n\n"
+            "💳 Please send your payment proof (screenshot/photo) with amount in caption.\n\n"
             "Type /cancel to abort.",
             parse_mode=ParseMode.HTML
         )
+
     elif data == "cancel_action":
-        user_state.pop(user_id, None)
+        user_state.pop(uid, None)
         await callback_query.message.edit_text("❌ Action cancelled.")
 
 @app.on_message(filters.command("cancel"))
@@ -537,65 +541,88 @@ async def cancel_command(client, message):
     await message.reply("❌ Action cancelled.")
 
 
-# ── URL removal flow ──
-@app.on_message(filters.command("removeurl"))
-@requires_premium
+# 2) Remove URL flow (premium only)
+@app.on_message(filters.command("removeurl") & requires_premium)
 async def remove_url_request(client, message: Message):
-    """ Ask user to upload a file for URL removal """
     user_state[message.from_user.id] = {"action": "awaiting_file"}
-    await message.reply("📂 Please upload the file containing URLs, and I'll remove them!")
+    await message.reply("📂 Please upload the file containing URLs to strip.")
 
+# 3) Merge flow (premium only)
+@app.on_message(filters.command("merge") & requires_premium)
+async def merge_request(client, message: Message):
+    user_state[message.from_user.id] = {"action": "awaiting_merge", "files": []}
+    await message.reply(
+        "📂 Send the files you want to merge (at least 2), then type /done when ready."
+    )
+
+@app.on_message(filters.command("done") & requires_premium)
+async def merge_done(client, message: Message):
+    uid = message.from_user.id
+    state = user_state.get(uid)
+    if not state or state.get("action") != "awaiting_merge":
+        return await message.reply("❌ No merge in progress. Use /merge first.")
+    files = state.get("files", [])
+    if len(files) < 2:
+        return await message.reply("❌ Please upload at least 2 files before typing /done.")
+
+    out_path = "merged.txt"
+    with open(out_path, "w", encoding="utf-8") as out:
+        for fp in files:
+            with open(fp, "r", encoding="utf-8") as inp:
+                out.write(inp.read())
+                out.write("\n")
+    await client.send_document(message.chat.id, out_path, caption="✅ Here’s your merged file!")
+    # cleanup
+    for fp in files:
+        os.remove(fp)
+    os.remove(out_path)
+    user_state.pop(uid, None)
+
+
+# 4) Single document handler for URL-removal & merge
 @app.on_message(filters.document)
-async def process_file(client, message: Message):
-    """ Process the uploaded file and strip out URLs """
-    user_id = message.from_user.id
+async def document_handler(client, message: Message):
+    uid = message.from_user.id
+    state = user_state.get(uid, {})
 
-    # Only proceed if we asked for a file
-    if user_state.get(user_id, {}).get("action") != "awaiting_file":
-        return
+    # URL-removal
+    if state.get("action") == "awaiting_file":
+        user_state.pop(uid, None)
+        file_path = await message.download()
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        cleaned = []
+        for line in lines:
+            parts = line.strip().split(":")
+            cleaned.append(f"{parts[-2]}:{parts[-1]}" if len(parts) >= 3 else line.strip())
 
-    user_state.pop(user_id, None)  # clear that “awaiting_file” state
-
-    # Download and read
-    file_path = await message.download()
-    with open(file_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    # Remove URLs (assumes URL is everything before the last two “:”-separated parts)
-    cleaned = []
-    for line in lines:
-        parts = line.strip().split(":")
-        if len(parts) >= 3:
-            cleaned.append(f"{parts[-2]}:{parts[-1]}")
+        if cleaned == lines:
+            await message.reply("🤔 No URLs found to remove!")
         else:
-            cleaned.append(line.strip())
-
-    # If nothing changed, tell the user
-    if cleaned == lines:
-        await message.reply("🤔 No URLs found to remove!")
+            out = "results_removedurl.txt"
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("\n".join(cleaned))
+            await client.send_document(message.chat.id, out, caption="✅ URLs stripped!")
+            os.remove(out)
         os.remove(file_path)
         return
 
-    # Write out the result
-    out_path = "results_removedurl.txt"
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(cleaned))
+    # Merge
+    if state.get("action") == "awaiting_merge":
+        fp = await message.download()
+        state["files"].append(fp)
+        await message.reply(f"✅ Received file #{len(state['files'])}. Send /done when finished.")
+        return
 
-    # Send it back
-    await client.send_document(
-        chat_id=message.chat.id,
-        document=out_path,
-        caption="✅ Here’s your file with URLs stripped!"
-    )
+    # otherwise, let other handlers run
+    return
 
-    # Clean up temp files
-    os.remove(file_path)
-    os.remove(out_path)
 
+# 5) Feedback/payment back-end
 @app.on_message((filters.text | filters.photo | filters.video))
 async def process_user_content(client, message):
-    user_id = message.from_user.id
-    state = user_state.get(user_id)
+    uid = message.from_user.id
+    state = user_state.get(uid)
     if not state:
         return
 
@@ -603,12 +630,12 @@ async def process_user_content(client, message):
     content = message.text or message.caption or "[No message text]"
 
     try:
-        user = await client.get_users(user_id)
+        user = await client.get_users(uid)
         user_info = user.first_name + (f" {user.last_name}" if user.last_name else "")
         if user.username:
             user_info += f" (@{user.username})"
     except:
-        user_info = f"User ID: {user_id}"
+        user_info = f"User ID: {uid}"
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -616,7 +643,7 @@ async def process_user_content(client, message):
         caption = (
             f"📬 *New Feedback*\n\n"
             f"👤 *From:* {user_info}\n"
-            f"🆔 *User ID:* {user_id}\n"
+            f"🆔 *User ID:* {uid}\n"
             f"📅 *Date:* {now}\n\n"
             f"💬 *Feedback:*\n{content}"
         )
@@ -624,7 +651,7 @@ async def process_user_content(client, message):
         caption = (
             f"💰 *New Payment Proof*\n\n"
             f"👤 *From:* {user_info}\n"
-            f"🆔 *User ID:* {user_id}\n"
+            f"🆔 *User ID:* {uid}\n"
             f"📅 *Date:* {now}\n\n"
             f"💬 *Caption:*\n{content}"
         )
@@ -638,11 +665,10 @@ async def process_user_content(client, message):
             await client.send_video(ADMIN_ID, message.video.file_id, caption=caption, parse_mode=ParseMode.MARKDOWN)
         else:
             await client.send_message(ADMIN_ID, caption, parse_mode=ParseMode.MARKDOWN)
-
         await message.reply("✅ Your message has been sent to the admin. Thank you!")
     except Exception as e:
         await message.reply(f"❌ Failed to send: {e}")
     finally:
-        user_state.pop(user_id, None)
+        user_state.pop(uid, None)
         
 app.run()
