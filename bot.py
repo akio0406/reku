@@ -548,6 +548,7 @@ async def cancel_command(client, message):
 
 # ── URL removal flow ──
 @app.on_message(filters.command("removeurl"))
+@requires_premium
 async def remove_url_request(client, message: Message):
     """ Ask user to upload a file for URL removal """
     user_state[message.from_user.id] = {"action": "awaiting_file"}
