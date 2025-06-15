@@ -99,53 +99,102 @@ def requires_premium(func):
 
     return wrapper
     
-@app.on_message(filters.command("generate"))
-async def generate_key(client, message):
-    if message.from_user.id != ADMIN_ID:
-        return await message.reply("❌ You are not authorized to use this command.")
+# ── ADMIN-ONLY COMMANDS ──
+# note: `& filters.user(ADMIN_ID)` ensures Telegram only delivers these to your admin.
 
+@app.on_message(filters.command("generate") & filters.user(ADMIN_ID))
+async def generate_key(client, message):
     if len(message.command) < 2:
         return await message.reply("Usage: /generate <duration> (e.g. 1d, 3h, 5m)")
 
     duration_str = message.command[1].lower()
     duration_seconds = parse_duration(duration_str)
-
     if duration_seconds is None:
         return await message.reply("❌ Invalid format. Use: 1d (days), 3h, or 5m")
 
-    key = generate_custom_key()
-    attempts = 0
-
-    while True:
+    # generate a unique key…
+    key, attempts = None, 0
+    while attempts < 5:
+        key = generate_custom_key()
         existing = supabase.table("keys_reku").select("key").eq("key", key).execute()
         if not existing.data:
             break
-        key = generate_custom_key()
         attempts += 1
-        if attempts > 5:
-            return await message.reply("❌ Failed to generate a unique key. Try again.")
+    if not key or attempts >= 5:
+        return await message.reply("❌ Could not generate a unique key. Try again.")
 
     insert_res = supabase.table("keys_reku").insert({
         "key": key,
         "duration_seconds": duration_seconds
     }).execute()
-
     if not insert_res.data:
-        print(f"Insertion failed: {insert_res.model_dump()}")
-        return await message.reply("❌ Failed to insert the key into the database.")
+        return await message.reply("❌ Database insertion failed.")
 
-    # Format expiry in Philippine time
-    expires_at_utc = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-    ph_tz = pytz_timezone("Asia/Manila")  # Correct: use pytz_timezone alias for pytz.timezone
-    expires_at_ph = expires_at_utc.astimezone(ph_tz)
-
+    # compute human expiry
+    expires_at_ph = (datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)) \
+        .astimezone(pytz_timezone("Asia/Manila"))
     await message.reply(
-        f"✅ Key generated successfully!\n"
-        f"🔑 Key: `{key}`\n"
-        f"⏳ Duration: {duration_str}\n"
-        f"📅 Expires on: `{expires_at_ph.isoformat(sep='T', timespec='seconds')}`",
+        f"✅ Key generated!\n🔑 `{key}`\n⏳ {duration_str}\n📅 Expires: `{expires_at_ph:%Y-%m-%d %H:%M:%S}`",
         quote=True
     )
+
+@app.on_message(filters.command("remove") & filters.user(ADMIN_ID))
+async def remove_key(client, message):
+    if len(message.command) < 2:
+        return await message.reply("Usage: /remove <key>")
+
+    key_to_remove = message.command[1]
+    delete_res = supabase.table("keys_reku").delete().eq("key", key_to_remove).execute()
+    deleted = len(getattr(delete_res, "data", []) or [])
+    if deleted:
+        await message.reply(f"🗑️ Removed `{key_to_remove}` ({deleted} row).")
+    else:
+        await message.reply("❌ Key not found.")
+
+@app.on_message(filters.command("removeallkeys") & filters.user(ADMIN_ID))
+async def remove_all_keys(client, message):
+    """ Danger: deletes every license key row """
+    confirmation = message.text.strip().lower()
+    # optional: require "/removeallkeys CONFIRM" to avoid accidents
+    if confirmation != "/removeallkeys confirm":
+        return await message.reply(
+            "⚠️ This will delete *all* keys.\n"
+            "Type `/removeallkeys confirm` to proceed.", parse_mode=ParseMode.MARKDOWN
+        )
+
+    delete_res = supabase.table("keys_reku").delete().execute()
+    deleted = len(getattr(delete_res, "data", []) or [])
+    await message.reply(f"🗑️ All keys removed: {deleted} rows deleted.")
+
+@app.on_message(filters.command("broadcast") & filters.user(ADMIN_ID))
+async def broadcast_message(client, message):
+    if len(message.command) < 2:
+        return await message.reply("Usage: /broadcast <announcement text>")
+
+    text = message.text.split(maxsplit=1)[1]
+    resp = supabase.table("keys_reku").select("redeemed_by").execute()
+    rows = getattr(resp, "data", []) or []
+    users = {row["redeemed_by"] for row in rows if row.get("redeemed_by")}
+
+    if not users:
+        return await message.reply("ℹ️ No subscribers to broadcast to.")
+
+    await message.reply(f"📢 Broadcasting to {len(users)} users…")
+    success = failed = 0
+    for uid in users:
+        try:
+            await client.send_message(
+                chat_id=int(uid),
+                text=f"📢 <b>Admin Announcement</b>\n\n{text>",
+                parse_mode=enums.ParseMode.HTML
+            )
+            success += 1
+        except:
+            failed += 1
+        await asyncio.sleep(0.3)
+
+    await message.reply(f"✅ Delivered: {success}\n❌ Failed: {failed}")
+
 
 def escape_md(text):
     # Escape only *, _, and ` for Markdown (basic)
@@ -248,73 +297,6 @@ async def myinfo(client, message):
     except Exception as e:
         print(f"Error in /myinfo: {e}")
         await message.reply("❌ Could not retrieve your info. Try again later.")
-
-@app.on_message(filters.command("remove"))
-async def remove_key(client, message):
-    if message.from_user.id != ADMIN_ID:
-        return await message.reply("❌ You are not authorized to use this command.")
-
-    if len(message.command) < 2:
-        return await message.reply("Usage: /remove -key-")
-
-    key_to_remove = message.command[1]
-
-    try:
-        delete_res = supabase.table("keys_reku").delete().eq("key", key_to_remove).execute()
-        if delete_res.data:
-            await message.reply(f"🗑️ Key `{key_to_remove}` has been removed.", parse_mode=ParseMode.MARKDOWN)
-        else:
-            await message.reply("❌ Key not found or already removed.")
-    except Exception as e:
-        print(f"Error removing key: {e}")
-        await message.reply("❌ Failed to remove key.")
-
-@app.on_message(filters.command("broadcast") & filters.user(ADMIN_ID))
-async def broadcast_message(client, message):
-    # 1) validate syntax
-    if len(message.command) < 2:
-        return await message.reply("❌ Usage: /broadcast <your announcement text>")
-
-    broadcast_text = message.text.split(maxsplit=1)[1]
-
-    # 2) fetch all redeemed users from Supabase
-    try:
-        resp = supabase.table("keys_reku") \
-                       .select("redeemed_by") \
-                       .execute()
-        # resp.data might not exist or be None, so default to []
-        rows = getattr(resp, "data", []) or []
-        users = {row["redeemed_by"] for row in rows if row.get("redeemed_by")}
-    except Exception:
-        logging.exception("Failed to load subscriber list")
-        return await message.reply("❌ Could not fetch subscriber list. Try again later.")
-
-    if not users:
-        return await message.reply("ℹ️ No active subscribers to broadcast to.")
-
-    # 3) confirm and start
-    await message.reply(f"📢 Broadcasting to {len(users)} subscribers…")
-
-    success = failed = 0
-    for uid in users:
-        try:
-            await client.send_message(
-                chat_id=int(uid),
-                text=f"📢 <b>Announcement from Admin:</b>\n\n{broadcast_text}",
-                parse_mode=enums.ParseMode.HTML
-            )
-            success += 1
-        except Exception:
-            failed += 1
-            logging.exception(f"Broadcast failed for user {uid}")
-        await asyncio.sleep(0.3)  # gentle pacing
-
-    # 4) summary
-    await message.reply(
-        f"📊 Broadcast completed:\n"
-        f"✅ Delivered: {success}\n"
-        f"❌ Failed: {failed}"
-    )
     
 @app.on_message(filters.command("search"))
 @requires_premium
