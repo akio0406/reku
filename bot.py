@@ -43,17 +43,23 @@ app = Client("log_search_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_T
 
 def check_user_access(user_id: int) -> bool:
     try:
-        res = supabase.table("keys_reku").select("*").eq("redeemed_by", user_id).execute()
-        if res.error or not res.data:
+        resp = supabase.table("keys_reku") \
+                       .select("*") \
+                       .eq("redeemed_by", user_id) \
+                       .execute()
+        rows = getattr(resp, "data", []) or []
+        if not rows:
             return False
+
         now_utc = datetime.now(timezone.utc)
-        for key in res.data:
+        for key in rows:
+            # expiry comes back as an ISO string ending in 'Z'
             expiry = datetime.fromisoformat(key["expiry"].replace("Z", "+00:00"))
             if expiry > now_utc:
                 return True
         return False
     except Exception as e:
-        print(f"Error checking user access: {e}")
+        logging.error("Error checking user access: %s", e)
         return False
 
 def generate_custom_key():
