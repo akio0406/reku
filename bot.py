@@ -339,68 +339,80 @@ async def search_command(client, message):
 @app.on_callback_query(filters.regex("^fsearch_"))
 async def perform_search_callback(client, cbq):
     try:
+        # parse callback data
         _, keyword, mode = cbq.data.split("_", 2)
         include_urls = (mode == "full")
+
+        # clean up UI
         await cbq.message.delete()
         await cbq.answer("🔍 Searching...", show_alert=False)
-
         msg = await cbq.message.reply_text(f"Searching `{keyword}`...\n[░░░░░░░░░░] 0%")
 
-        try:
-            res = supabase.table("reku").select("line").ilike("line", f"%{keyword}%").execute()
-            lines = [row["line"] for row in res.data] if res.data else []
-            print(f"[INFO] Found {len(lines)} lines for keyword '{keyword}'")
-        except Exception as e:
-            print(f"[ERROR] Supabase query failed: {e}")
-            return await msg.edit_text("❌ Error querying the database.")
-
-        if not lines:
+        # 1) fetch matching rows (include primary key)
+        res = supabase.table("reku") \
+            .select("id", "line") \
+            .ilike("line", f"%{keyword}%") \
+            .execute()
+        raw_rows = res.data or []
+        if not raw_rows:
             return await msg.edit_text("❌ No results found.")
 
-        # Format and filter
-        formatted = set()
-        for line in lines:
-            if not include_urls:
-                parts = line.split(":")
-                if len(parts) >= 2:
-                    line = ":".join(parts[-2:])
-            formatted.add(line.strip())
-
-        if not formatted:
-            return await msg.edit_text("❌ No valid formatted results.")
-
-        # Remove overused duplicates
-        result_file = "result.txt"
+        # 2) sanitize & dedupe by sanitized text
         existing = []
+        result_file = "result.txt"
         if os.path.exists(result_file):
             with open(result_file, "r", encoding="utf-8") as f:
                 existing = [x.strip() for x in f]
         counts = Counter(existing)
 
-        filtered = [x for x in formatted if counts[x] < 2]
-        for x in filtered:
-            counts[x] += 1
+        # build a map of {id, san_line}
+        rows_map = []
+        for r in raw_rows:
+            line = r["line"]
+            if not include_urls:
+                parts = line.split(":")
+                if len(parts) >= 2:
+                    line = ":".join(parts[-2:])
+            san = line.strip()
+            rows_map.append({"id": r["id"], "san": san})
 
+        # filter out over-used
+        unique_sans = list({m["san"] for m in rows_map})
+        filtered = [s for s in unique_sans if counts[s] < 2]
         if not filtered:
             return await msg.edit_text("❌ All results already used too many times.")
 
-        selected = random.sample(filtered, min(len(filtered), random.randint(100, 120)))
+        # 3) select a random subset
+        limit = random.randint(100, 120)
+        selected_sans = random.sample(filtered, min(len(filtered), limit))
+
+        # 4) write to disk for your download/copy logic
         with open(result_file, "w", encoding="utf-8") as f:
-            for line in selected:
-                f.write(f"{line}\n")
+            for s in selected_sans:
+                f.write(f"{s}\n")
 
-        preview = "\n".join(selected[:5]) + ("\n..." if len(selected) > 5 else "")
+        # 5) delete them from the DB by mapping back to row IDs
+        ids_to_delete = []
+        for s in selected_sans:
+            for idx, m in enumerate(rows_map):
+                if m["san"] == s:
+                    ids_to_delete.append(m["id"])
+                    rows_map.pop(idx)
+                    break
+        supabase.table("reku").delete().in_("id", ids_to_delete).execute()
+
+        # 6) show preview + buttons
+        preview = "\n".join(selected_sans[:5]) + ("…" if len(selected_sans) > 5 else "")
         fmt_label = "🌍 Full (with URLs)" if include_urls else "✅ User:Pass only"
-
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📥 Download Results", callback_data=f"dl_{keyword}")],
-            [InlineKeyboardButton("📋 Copy Code", callback_data=f"cc_{keyword}")]
+            [InlineKeyboardButton("📋 Copy Code",       callback_data=f"cc_{keyword}")]
         ])
         await msg.edit_text(
-            f"🔎 **Results for:** `{keyword}`\n"
-            f"📄 **Format:** {fmt_label}\n"
-            f"📌 **Generated:** `{len(selected)}`\n\n"
-            f"🔹 **Preview:**\n```\n{preview}\n```",
+            f"🔎 Results for `{keyword}`\n"
+            f"📄 Format: {fmt_label}\n"
+            f"📌 Generated: `{len(selected_sans)}`\n\n"
+            f"🔹 Preview:\n```\n{preview}\n```",
             reply_markup=keyboard
         )
 
