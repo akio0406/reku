@@ -276,17 +276,19 @@ async def broadcast_message(client, message):
 
     broadcast_text = message.text.split(maxsplit=1)[1]
 
-    # 2) fetch all redeemed users from Supabase (no filter on the query)
+    # 2) fetch all redeemed users from Supabase
     try:
-        res = supabase.table("keys_reku") \
-                      .select("redeemed_by") \
-                      .execute()
-        if res.error:
-            raise Exception(res.error)
+        resp = supabase.table("keys_reku").select("redeemed_by").execute()
+        # supabase-py v1: check HTTP status
+        if not (200 <= resp.status_code < 300):
+            raise Exception(f"HTTP {resp.status_code}")
 
-        # filter out None/NULL in Python & dedupe
-        users = {row["redeemed_by"] for row in res.data
-                 if row.get("redeemed_by") not in (None, "None", "")}
+        # filter out nulls/empty and dedupe
+        users = {
+            row["redeemed_by"]
+            for row in (resp.data or [])
+            if row.get("redeemed_by") not in (None, "", "None")
+        }
     except Exception:
         logging.exception("Failed to load subscriber list")
         return await message.reply("❌ Could not fetch subscriber list. Try again later.")
@@ -309,7 +311,7 @@ async def broadcast_message(client, message):
         except Exception:
             failed += 1
             logging.exception(f"Broadcast failed for user {uid}")
-        await asyncio.sleep(0.3)  # gentle pacing
+        await asyncio.sleep(0.3)
 
     # 4) summary
     await message.reply(
